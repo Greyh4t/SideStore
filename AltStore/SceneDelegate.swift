@@ -66,7 +66,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate
         // Flush any .ipa import that arrived before the scene was active (cold launch).
         guard let url = self.pendingImportIPAURL else { return }
         self.pendingImportIPAURL = nil
-        NotificationCenter.default.post(name: AppDelegate.importAppDeepLinkNotification, object: nil, userInfo: [AppDelegate.importAppDeepLinkURLKey: url])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            NotificationCenter.default.post(name: AppDelegate.importAppDeepLinkNotification, object: nil, userInfo: [AppDelegate.importAppDeepLinkURLKey: url])
+        }
     }
 
     func sceneDidEnterBackground(_ scene: UIScene)
