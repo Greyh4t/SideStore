@@ -200,10 +200,10 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
 
     private func backgroundAuthenticationError(uiRequirement: String) -> NSError {
         let authManager = AuthManager.shared
-        let visibility = "keychainService=\(Bundle.Info.appbundleIdentifier), bundleID=\(Bundle.main.bundleIdentifier ?? \"nil\"), hasEmail=\(authManager.currentAppleID != nil), hasPassword=\(authManager.password != nil), hasADSID=\(authManager.adsid != nil), hasXcodeToken=\(authManager.xcodeToken != nil)"
+        let visibility = "keychainService=\(Bundle.Info.appbundleIdentifier), bundleID=\(Bundle.main.bundleIdentifier ?? "nil"), hasEmail=\(authManager.currentAppleID != nil), hasPassword=\(authManager.password != nil), hasADSID=\(authManager.adsid != nil), hasXcodeToken=\(authManager.xcodeToken != nil)"
         let failures = self.silentAuthenticationFailures.isEmpty
             ? "silentAuth=no usable credential pair"
-            : "silentAuthFailures=\(self.silentAuthenticationFailures.joined(separator: \"; \"))"
+            : "silentAuthFailures=\(self.silentAuthenticationFailures.joined(separator: "; "))"
         return NSError(
             domain: "SideStore.BackgroundAuthentication",
             code: 1,
