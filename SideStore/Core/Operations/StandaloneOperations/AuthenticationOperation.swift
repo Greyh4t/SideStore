@@ -88,6 +88,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
     
     private var appleIDEmailAddress: String?
     private var requiresPostAuthFlow = false
+    private var silentAuthenticationFailures: [String] = []
     
     let skipDeviceRegistration: Bool
     let skipCertificateProvisioning: Bool
@@ -172,7 +173,20 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
         let (account, session) = if let silentResult = try await self.silentSignIn() {
             silentResult
         } else {
-            try await self.authenticationLoop()
+            do {
+                try await self.authenticationLoop()
+            } catch is CancellationError {
+                let authManager = AuthManager.shared
+                let visibility = "keychainService=\(Bundle.Info.appbundleIdentifier), bundleID=\(Bundle.main.bundleIdentifier ?? \"nil\"), hasEmail=\(authManager.currentAppleID != nil), hasPassword=\(authManager.password != nil), hasADSID=\(authManager.adsid != nil), hasXcodeToken=\(authManager.xcodeToken != nil)"
+                let failures = self.silentAuthenticationFailures.isEmpty
+                    ? "no usable silent credentials"
+                    : self.silentAuthenticationFailures.joined(separator: "; ")
+                throw NSError(
+                    domain: "SideStore.BackgroundAuthentication",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Background authentication requires UI after silent sign-in failed (\(visibility)); \(failures)"]
+                )
+            }
         }
         self.context.session = session
         AuthManager.shared.session = session
@@ -277,6 +291,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
     }
     
     private func silentSignIn() async throws -> (ALTAccount, ALTAppleAPISession)? {
+        self.silentAuthenticationFailures.removeAll(keepingCapacity: true)
         let adsid = AuthManager.shared.adsid
         let xcodeToken = AuthManager.shared.xcodeToken
         let appleID = AuthManager.shared.currentAppleID
@@ -310,6 +325,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
                 )
             } catch {
                 self.debugLog("[AuthenticationOperation] Token authentication failed: \(error)")
+                self.silentAuthenticationFailures.append("token authentication: \(error.localizedDescription)")
             }
         }
         
@@ -322,6 +338,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
                 return try await self.authenticate(appleID: appleID, password: password)
             } catch {
                 self.debugLog("[AuthenticationOperation] Saved password authentication failed: \(error)")
+                self.silentAuthenticationFailures.append("password authentication: \(error.localizedDescription)")
             }
         }
 
