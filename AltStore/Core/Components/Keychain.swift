@@ -55,6 +55,7 @@ public class Keychain
 {
     public static let shared = Keychain()
 
+    private let sideStoreLegacyKeychain: KeychainAccess.Keychain
     private let legacyKeychain: KeychainAccess.Keychain
     fileprivate let keychain: KeychainAccess.Keychain
 
@@ -107,6 +108,9 @@ public class Keychain
     
     private init() {
         let service = Bundle.Info.appbundleIdentifier
+        self.sideStoreLegacyKeychain = KeychainAccess.Keychain(service: "com.SideStore.SideStore")
+            .accessibility(.afterFirstUnlock)
+            .synchronizable(true)
         self.legacyKeychain = KeychainAccess.Keychain(service: service)
             .accessibility(.afterFirstUnlock)
             .synchronizable(true)
@@ -142,6 +146,12 @@ public class Keychain
             } else if let string = try? self.legacyKeychain.getString(key) {
                 try? self.keychain.set(string, key: key)
                 migratedKeys.append(key)
+            } else if let data = try? self.sideStoreLegacyKeychain.getData(key) {
+                try? self.keychain.set(data, key: key)
+                migratedKeys.append(key)
+            } else if let string = try? self.sideStoreLegacyKeychain.getString(key) {
+                try? self.keychain.set(string, key: key)
+                migratedKeys.append(key)
             }
         }
         debugLog("[Keychain] LiveContainer shared access group enabled: \(accessGroup), migratedKeyCount=\(migratedKeys.count)")
@@ -151,7 +161,7 @@ public class Keychain
         if let value = try? self.keychain.getData(key) {
             return value
         }
-        guard let value = try? self.legacyKeychain.getData(key) else { return nil }
+        guard let value = (try? self.legacyKeychain.getData(key)) ?? (try? self.sideStoreLegacyKeychain.getData(key)) else { return nil }
         try? self.keychain.set(value, key: key)
         return value
     }
@@ -160,7 +170,7 @@ public class Keychain
         if let value = try? self.keychain.getString(key) {
             return value
         }
-        guard let value = try? self.legacyKeychain.getString(key) else { return nil }
+        guard let value = (try? self.legacyKeychain.getString(key)) ?? (try? self.sideStoreLegacyKeychain.getString(key)) else { return nil }
         try? self.keychain.set(value, key: key)
         return value
     }
@@ -170,12 +180,18 @@ public class Keychain
         if value == nil && self.keychain !== self.legacyKeychain {
             self.legacyKeychain[data: key] = nil
         }
+        if value == nil {
+            self.sideStoreLegacyKeychain[data: key] = nil
+        }
     }
 
     fileprivate func setString(_ value: String?, forKey key: String) {
         self.keychain[key] = value
         if value == nil && self.keychain !== self.legacyKeychain {
             self.legacyKeychain[key] = nil
+        }
+        if value == nil {
+            self.sideStoreLegacyKeychain[key] = nil
         }
     }
     
@@ -251,6 +267,7 @@ public class Keychain
         if self.keychain !== self.legacyKeychain {
             try? self.legacyKeychain.removeAll()
         }
+        try? self.sideStoreLegacyKeychain.removeAll()
         debugLog("[Keychain] All Keychain items and in-memory session/team cleared.")
     }
 }
