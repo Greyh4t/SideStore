@@ -209,46 +209,78 @@ private extension RefreshAllAppsIntent
 {
     func refreshAllApps() async throws
     {
-        try await InstallIPAIntent.startDatabaseIfNeeded()
-        
-        let context = DatabaseManager.shared.persistentContainer.newBackgroundContext()
-        let installedApps = await context.perform { InstalledApp.fetchAppsForRefreshingAll(in: context) }
-        
-        try await withCheckedThrowingContinuation { continuation in
-            let operation = try? AppManager.shared.backgroundRefresh(installedApps, presentsNotifications: self.presentsNotifications) { (result) in
-                do
-                {
-                    let results = try result.get()
-                    
-                    for (_, result) in results
-                    {
-                        guard case let .failure(error) = result else { continue }
-                        throw error
-                    }
-                    
-                    continuation.resume()
-                }
-                catch ~RefreshErrorCode.noInstalledApps
-                {
-                    continuation.resume()
-                }
-                catch
-                {
-                    continuation.resume(throwing: error)
-                }
-            }
-            
-            guard let operation else {
-                debugLog("[RefreshAllAppsIntent] backgroundRefresh instance is nil")
-                return 
-            }
-            
-            operation.ignoresServerNotFoundError = false
-            
-            self.progress.addChild(operation.progress, withPendingUnitCount: 1)
-            
+        try await performSideStoreBackgroundRefresh(progress: self.progress, presentsNotifications: self.presentsNotifications) { operation in
             Task {
                 await self.operationActor.set(operation)
+            }
+        }
+    }
+}
+
+@available(iOS 17.0, *)
+fileprivate func performSideStoreBackgroundRefresh(progress: Progress, presentsNotifications: Bool, operationStarted: (BackgroundRefreshAppsOperation) -> Void = { _ in }) async throws
+{
+    try await InstallIPAIntent.startDatabaseIfNeeded()
+
+    let context = DatabaseManager.shared.persistentContainer.newBackgroundContext()
+    let installedApps = await context.perform { InstalledApp.fetchAppsForRefreshingAll(in: context) }
+
+    try await withCheckedThrowingContinuation { continuation in
+        let operation = try? AppManager.shared.backgroundRefresh(installedApps, presentsNotifications: presentsNotifications) { result in
+            do
+            {
+                let results = try result.get()
+
+                for (_, result) in results
+                {
+                    guard case let .failure(error) = result else { continue }
+                    throw error
+                }
+
+                continuation.resume()
+            }
+            catch ~RefreshErrorCode.noInstalledApps
+            {
+                continuation.resume()
+            }
+            catch
+            {
+                continuation.resume(throwing: error)
+            }
+        }
+
+        guard let operation else {
+            debugLog("[SideStoreBackgroundRefresh] backgroundRefresh instance is nil")
+            continuation.resume()
+            return
+        }
+
+        operation.ignoresServerNotFoundError = false
+        progress.addChild(operation.progress, withPendingUnitCount: 1)
+        operationStarted(operation)
+    }
+}
+
+// LiveContainer's LiveProcess has no AppIntent execution context of its own.
+// Expose the same underlying refresh operation through an Objective-C runtime
+// bridge so LiveProcess can refresh without nesting or manually performing an
+// AppIntent.
+@available(iOS 17.0, *)
+@objc(SideStoreLiveProcessRefreshBridge)
+final class SideStoreLiveProcessRefreshBridge: NSObject
+{
+    @objc(refreshAllAppsWithProgress:completion:)
+    class func refreshAllApps(progress: Progress, completion: @escaping (NSError?) -> Void)
+    {
+        Task {
+            do
+            {
+                try await performSideStoreBackgroundRefresh(progress: progress, presentsNotifications: true)
+                completion(nil)
+            }
+            catch
+            {
+                completion(error as NSError)
             }
         }
     }
