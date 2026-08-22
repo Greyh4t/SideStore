@@ -1,8 +1,8 @@
 #sidestore dependencies
 [submodule "Dependencies/minimuxer"]
     path = Dependencies/minimuxer
-    url = https://github.com/SideStore/minimuxer
-    branch = develop
+    url = https://github.com/Greyh4t/minimuxer.git
+    branch = fix-sidestore-background-refresh
 [submodule "Dependencies/AltSign"]
     path = Dependencies/AltSign
     url = https://github.com/SideStore/AltSign
