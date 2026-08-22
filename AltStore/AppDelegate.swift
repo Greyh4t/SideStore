@@ -149,6 +149,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             debugLog("[AppDelegate] Boot sequence starting...")
             await AppBootManager.shared.performBootSequence()
             debugLog("[AppDelegate] Boot sequence completed.")
+            NotificationCenter.default.post(
+                name: Notification.Name("io.sidestore.BootSequenceDidFinish"),
+                object: nil
+            )
         }
         
         
