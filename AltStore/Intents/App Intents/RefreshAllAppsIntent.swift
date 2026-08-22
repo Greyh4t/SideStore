@@ -220,38 +220,48 @@ private extension RefreshAllAppsIntent
 @available(iOS 17.0, *)
 fileprivate func performSideStoreBackgroundRefresh(progress: Progress, presentsNotifications: Bool, operationStarted: (BackgroundRefreshAppsOperation) -> Void = { _ in }) async throws
 {
-    try await InstallIPAIntent.startDatabaseIfNeeded()
+    do
+    {
+        try await InstallIPAIntent.startDatabaseIfNeeded()
+    }
+    catch
+    {
+        throw sideStoreBackgroundRefreshError(stage: "database startup", underlyingError: error)
+    }
 
     let context = DatabaseManager.shared.persistentContainer.newBackgroundContext()
     let installedApps = await context.perform { InstalledApp.fetchAppsForRefreshingAll(in: context) }
 
     try await withCheckedThrowingContinuation { continuation in
-        let operation = try? AppManager.shared.backgroundRefresh(installedApps, presentsNotifications: presentsNotifications) { result in
-            do
-            {
-                let results = try result.get()
-
-                for (_, result) in results
+        let operation: BackgroundRefreshAppsOperation
+        do
+        {
+            operation = try AppManager.shared.backgroundRefresh(installedApps, presentsNotifications: presentsNotifications) { result in
+                do
                 {
-                    guard case let .failure(error) = result else { continue }
-                    throw error
-                }
+                    let results = try result.get()
 
-                continuation.resume()
-            }
-            catch ~RefreshErrorCode.noInstalledApps
-            {
-                continuation.resume()
-            }
-            catch
-            {
-                continuation.resume(throwing: error)
+                    for (bundleIdentifier, result) in results
+                    {
+                        guard case let .failure(error) = result else { continue }
+                        throw sideStoreBackgroundRefreshError(stage: "app \(bundleIdentifier)", underlyingError: error)
+                    }
+
+                    continuation.resume()
+                }
+                catch ~RefreshErrorCode.noInstalledApps
+                {
+                    continuation.resume()
+                }
+                catch
+                {
+                    continuation.resume(throwing: sideStoreBackgroundRefreshError(stage: "refresh operation", underlyingError: error))
+                }
             }
         }
-
-        guard let operation else {
-            debugLog("[SideStoreBackgroundRefresh] backgroundRefresh instance is nil")
-            continuation.resume()
+        catch
+        {
+            continuation.resume(throwing: sideStoreBackgroundRefreshError(stage: "operation creation", underlyingError: error))
             return
         }
 
@@ -259,6 +269,20 @@ fileprivate func performSideStoreBackgroundRefresh(progress: Progress, presentsN
         progress.addChild(operation.progress, withPendingUnitCount: 1)
         operationStarted(operation)
     }
+}
+
+@available(iOS 17.0, *)
+fileprivate func sideStoreBackgroundRefreshError(stage: String, underlyingError: Error) -> NSError
+{
+    let error = underlyingError as NSError
+    return NSError(
+        domain: "SideStoreBackgroundRefresh",
+        code: error.code,
+        userInfo: [
+            NSLocalizedDescriptionKey: "SideStore background refresh failed during \(stage): \(error.localizedDescription)",
+            NSUnderlyingErrorKey: error
+        ]
+    )
 }
 
 // LiveContainer's LiveProcess has no AppIntent execution context of its own.
