@@ -5,7 +5,7 @@ permissions:
 
 on:
   push:
-    branches: [develop, LiveContainerSupport]
+    branches: [develop, LiveContainerSupport, fix-sidestore-background-refresh]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
