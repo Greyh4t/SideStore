@@ -148,15 +148,26 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
                 reportProgress(100)
                 return result
             } catch {
-                self.debugLog("[AuthenticationOperation] execute caught error during authentication: \(error). Cleaning up...")
+                let reportedError: Error
+                if error is CancellationError,
+                   let authFlowHandler = self.context.authenticationHandler as? AuthFlowHandler,
+                   authFlowHandler.isHeadless
+                {
+                    reportedError = self.backgroundAuthenticationError(
+                        uiRequirement: authFlowHandler.headlessFailureDescription ?? "unknown UI request"
+                    )
+                } else {
+                    reportedError = error
+                }
+                self.debugLog("[AuthenticationOperation] execute caught error during authentication: \(reportedError). Cleaning up...")
                 // if auth was good, but certs and others had errors don't signOut ourselves.
                 if !AuthManager.shared.hasStoredPassword &&
                    !AuthManager.shared.hasStoredXcodeToken
                 {
                     AuthManager.shared.signOut()
                 }
-                try? await self.finalizeAuthentication(result: .failure(error))
-                throw error
+                try? await self.finalizeAuthentication(result: .failure(reportedError))
+                throw reportedError
             }
         }
         
@@ -173,20 +184,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
         let (account, session) = if let silentResult = try await self.silentSignIn() {
             silentResult
         } else {
-            do {
-                try await self.authenticationLoop()
-            } catch is CancellationError {
-                let authManager = AuthManager.shared
-                let visibility = "keychainService=\(Bundle.Info.appbundleIdentifier), bundleID=\(Bundle.main.bundleIdentifier ?? \"nil\"), hasEmail=\(authManager.currentAppleID != nil), hasPassword=\(authManager.password != nil), hasADSID=\(authManager.adsid != nil), hasXcodeToken=\(authManager.xcodeToken != nil)"
-                let failures = self.silentAuthenticationFailures.isEmpty
-                    ? "no usable silent credentials"
-                    : self.silentAuthenticationFailures.joined(separator: "; ")
-                throw NSError(
-                    domain: "SideStore.BackgroundAuthentication",
-                    code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Background authentication requires UI after silent sign-in failed (\(visibility)); \(failures)"]
-                )
-            }
+            try await self.authenticationLoop()
         }
         self.context.session = session
         AuthManager.shared.session = session
@@ -198,6 +196,19 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
         )
         
         return authResult
+    }
+
+    private func backgroundAuthenticationError(uiRequirement: String) -> NSError {
+        let authManager = AuthManager.shared
+        let visibility = "keychainService=\(Bundle.Info.appbundleIdentifier), bundleID=\(Bundle.main.bundleIdentifier ?? \"nil\"), hasEmail=\(authManager.currentAppleID != nil), hasPassword=\(authManager.password != nil), hasADSID=\(authManager.adsid != nil), hasXcodeToken=\(authManager.xcodeToken != nil)"
+        let failures = self.silentAuthenticationFailures.isEmpty
+            ? "silentAuth=no usable credential pair"
+            : "silentAuthFailures=\(self.silentAuthenticationFailures.joined(separator: \"; \"))"
+        return NSError(
+            domain: "SideStore.BackgroundAuthentication",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Background authentication requires UI (\(uiRequirement)); \(visibility); \(failures)"]
+        )
     }
 
     private func provisioningLoop(account: ALTAccount,

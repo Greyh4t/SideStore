@@ -13,6 +13,15 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     
     private weak var presentingViewController: UIViewController?
     private weak var presentedAuthVC: AuthenticationViewController?
+    private(set) var headlessFailureDescription: String?
+
+    var isHeadless: Bool { self.presentingViewController == nil }
+
+    private func recordHeadlessFailure(_ description: String) {
+        guard self.isHeadless else { return }
+        self.headlessFailureDescription = description
+        debugLog("[AuthFlowHandler] Background authentication requires UI: \(description)")
+    }
     
     private var credentialsContinuation: CheckedContinuation<(String, String), Error>?
     private var activeAuthCompletionHandler: ((Result<(ALTAccount, ALTAppleAPISession), Error>) -> Void)?
@@ -31,6 +40,7 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     @MainActor
     func credentials() async throws -> (String, String) {
         guard let presentingViewController = self.presentingViewController else {
+            self.recordHeadlessFailure("interactive Apple ID credentials requested")
             throw OperationError.cancelled
         }
         
@@ -96,6 +106,10 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     
     @MainActor
     func verificationCode() async throws -> String? {
+        guard !self.isHeadless else {
+            self.recordHeadlessFailure("two-factor verification code requested")
+            throw OperationError.cancelled
+        }
         return try await withCheckedThrowingContinuation { continuation in
             let alertController = UIAlertController(title: NSLocalizedString("Please enter the 6-digit verification code that was sent to your Apple devices.", comment: ""), message: nil, preferredStyle: .alert)
             var observer: NSObjectProtocol?
@@ -134,6 +148,10 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     
     @MainActor
     func resolveRevocation(certificates: [ALTX509Certificate], teamType: ALTTeamType) async throws -> RevokeDecision {
+        guard !self.isHeadless else {
+            self.recordHeadlessFailure("certificate revocation decision requested (certificateCount=\(certificates.count), teamType=\(teamType.rawValue))")
+            throw OperationError.cancelled
+        }
         return try await withCheckedThrowingContinuation { continuation in
             let alertController = UIAlertController(
                 title: NSLocalizedString("Revoke Certificates", comment: ""),
@@ -190,6 +208,10 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     
     @MainActor
     func resolveTeam(_ teams: [ALTTeam]) async throws -> ALTTeam {
+        guard !self.isHeadless else {
+            self.recordHeadlessFailure("team selection requested (teamCount=\(teams.count))")
+            throw OperationError.cancelled
+        }
         return try await withCheckedThrowingContinuation { continuation in
             let storyboard = UIStoryboard(name: "Authentication", bundle: nil)
             let selectTeamViewController = storyboard.instantiateViewController(withIdentifier: "selectTeamViewController") as! SelectTeamViewController
@@ -203,6 +225,10 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     
     @MainActor
     func resolvePostAuth() async {
+        guard !self.isHeadless else {
+            self.recordHeadlessFailure("post-authentication instructions requested")
+            return
+        }
         await withCheckedContinuation { continuation in
             var hasResumed = false
             let storyboard = UIStoryboard(name: "Authentication", bundle: nil)
@@ -222,6 +248,10 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     
     @MainActor
     func resolveProvisioningError(_ error: Error) async -> ProvisioningErrorDecision {
+        guard !self.isHeadless else {
+            self.recordHeadlessFailure("provisioning error requires a retry decision: \(error.localizedDescription)")
+            return .cancel
+        }
         return await withCheckedContinuation { continuation in
             let alertController = UIAlertController(
                 title: NSLocalizedString("Developer Portal Error", comment: ""),
@@ -250,6 +280,10 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     
     @MainActor
     func resolveResign(mismatchReason: CodeSignValidationReason, context: AuthenticatedOperationContext) async throws -> Bool {
+        guard !self.isHeadless else {
+            self.recordHeadlessFailure("SideStore resign confirmation requested: \(mismatchReason)")
+            throw OperationError.cancelled
+        }
         return try await withCheckedThrowingContinuation { continuation in
             var hasResumed = false
             let storyboard = UIStoryboard(name: "Authentication", bundle: nil)
