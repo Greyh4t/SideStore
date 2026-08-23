@@ -30,16 +30,16 @@ public struct KeychainItem<Value>
         get {
             switch Value.self
             {
-            case is Data.Type: return try? Keychain.shared.keychain.getData(self.key) as? Value
-            case is String.Type: return try? Keychain.shared.keychain.getString(self.key) as? Value
+            case is Data.Type: return Keychain.shared.data(forKey: self.key) as? Value
+            case is String.Type: return Keychain.shared.string(forKey: self.key) as? Value
             default: return nil
             }
         }
         set {
             switch Value.self
             {
-            case is Data.Type: Keychain.shared.keychain[data: self.key] = newValue as? Data
-            case is String.Type: Keychain.shared.keychain[self.key] = newValue as? String
+            case is Data.Type: Keychain.shared.setData(newValue as? Data, forKey: self.key)
+            case is String.Type: Keychain.shared.setString(newValue as? String, forKey: self.key)
             default: break
             }
         }
@@ -55,8 +55,8 @@ public class Keychain
 {
     public static let shared = Keychain()
 
-    private let containerKeychain: KeychainAccess.Keychain
-    private let standaloneSideStoreKeychain: KeychainAccess.Keychain
+    private let sideStoreLegacyKeychain: KeychainAccess.Keychain
+    private let legacyKeychain: KeychainAccess.Keychain
     fileprivate let keychain: KeychainAccess.Keychain
 
     private static let migratableKeys = [
@@ -102,22 +102,16 @@ public class Keychain
     // MARK: - Dynamic Imported Certificates Storage
 
     public subscript(certificateSerial serial: String) -> Data? {
-        get { try? self.keychain.getData("importedCert_" + serial) }
-        set {
-            if let data = newValue {
-                try? self.keychain.set(data, key: "importedCert_" + serial)
-            } else {
-                try? self.keychain.remove("importedCert_" + serial)
-            }
-        }
+        get { self.data(forKey: "importedCert_" + serial) }
+        set { self.setData(newValue, forKey: "importedCert_" + serial) }
     }
     
     private init() {
         let service = Bundle.Info.appbundleIdentifier
-        self.containerKeychain = KeychainAccess.Keychain(service: service)
+        self.sideStoreLegacyKeychain = KeychainAccess.Keychain(service: "com.SideStore.SideStore")
             .accessibility(.afterFirstUnlock)
             .synchronizable(true)
-        self.standaloneSideStoreKeychain = KeychainAccess.Keychain(service: "com.SideStore.SideStore")
+        self.legacyKeychain = KeychainAccess.Keychain(service: service)
             .accessibility(.afterFirstUnlock)
             .synchronizable(true)
 
@@ -125,9 +119,9 @@ public class Keychain
             self.keychain = KeychainAccess.Keychain(service: service, accessGroup: accessGroup)
                 .accessibility(.afterFirstUnlock)
                 .synchronizable(true)
-            self.migrateCredentialsToSharedKeychain()
+            self.migrateItemsToSharedKeychain()
         } else {
-            self.keychain = self.containerKeychain
+            self.keychain = self.legacyKeychain
         }
 
         self.migrateLegacyKeychainItems()
@@ -143,17 +137,55 @@ public class Keychain
         return groups.first { $0.hasSuffix(".com.kdt.livecontainer.shared") }
     }
 
-    private func migrateCredentialsToSharedKeychain() {
+    private func migrateItemsToSharedKeychain() {
         for key in Self.migratableKeys {
             guard (try? self.keychain.getData(key)) == nil,
                   (try? self.keychain.getString(key)) == nil
             else { continue }
 
-            if let data = (try? self.containerKeychain.getData(key)) ?? (try? self.standaloneSideStoreKeychain.getData(key)) {
+            if let data = (try? self.legacyKeychain.getData(key)) ?? (try? self.sideStoreLegacyKeychain.getData(key)) {
                 try? self.keychain.set(data, key: key)
-            } else if let string = (try? self.containerKeychain.getString(key)) ?? (try? self.standaloneSideStoreKeychain.getString(key)) {
+            } else if let string = (try? self.legacyKeychain.getString(key)) ?? (try? self.sideStoreLegacyKeychain.getString(key)) {
                 try? self.keychain.set(string, key: key)
             }
+        }
+    }
+
+    fileprivate func data(forKey key: String) -> Data? {
+        if let value = try? self.keychain.getData(key) {
+            return value
+        }
+        guard let value = (try? self.legacyKeychain.getData(key)) ?? (try? self.sideStoreLegacyKeychain.getData(key)) else { return nil }
+        try? self.keychain.set(value, key: key)
+        return value
+    }
+
+    fileprivate func string(forKey key: String) -> String? {
+        if let value = try? self.keychain.getString(key) {
+            return value
+        }
+        guard let value = (try? self.legacyKeychain.getString(key)) ?? (try? self.sideStoreLegacyKeychain.getString(key)) else { return nil }
+        try? self.keychain.set(value, key: key)
+        return value
+    }
+
+    fileprivate func setData(_ value: Data?, forKey key: String) {
+        self.keychain[data: key] = value
+        if value == nil && self.keychain !== self.legacyKeychain {
+            self.legacyKeychain[data: key] = nil
+        }
+        if value == nil {
+            self.sideStoreLegacyKeychain[data: key] = nil
+        }
+    }
+
+    fileprivate func setString(_ value: String?, forKey key: String) {
+        self.keychain[key] = value
+        if value == nil && self.keychain !== self.legacyKeychain {
+            self.legacyKeychain[key] = nil
+        }
+        if value == nil {
+            self.sideStoreLegacyKeychain[key] = nil
         }
     }
     
@@ -226,6 +258,10 @@ public class Keychain
     {
         debugLog("[Keychain] Clearing all Keychain items related to this instance...")
         try? self.keychain.removeAll()
+        if self.keychain !== self.legacyKeychain {
+            try? self.legacyKeychain.removeAll()
+        }
+        try? self.sideStoreLegacyKeychain.removeAll()
         debugLog("[Keychain] All Keychain items and in-memory session/team cleared.")
     }
 }
