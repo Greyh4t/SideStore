@@ -10,11 +10,47 @@
 import UserNotifications
 import AVFoundation
 import Intents
+import Security
 @preconcurrency import AltSign
 import CoreData
 
 
 import Nuke
+
+@_silgen_name("SecTaskCreateFromSelf")
+private func CleanerSecTaskCreateFromSelf(_ allocator: CFAllocator?) -> CFTypeRef
+
+@_silgen_name("SecTaskCopyValueForEntitlement")
+private func CleanerSecTaskCopyValueForEntitlement(
+    _ task: CFTypeRef,
+    _ entitlement: CFString,
+    _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?
+) -> Unmanaged<CFTypeRef>?
+
+private func purgeSideStoreKeychainServices() {
+    let services = Set([Bundle.Info.appbundleIdentifier, "com.kdt.livecontainer", "com.SideStore.SideStore"])
+    let task = CleanerSecTaskCreateFromSelf(nil)
+    let entitlementValue = CleanerSecTaskCopyValueForEntitlement(
+        task,
+        "keychain-access-groups" as CFString,
+        nil
+    )?.takeRetainedValue()
+    let accessGroups = entitlementValue as? [String] ?? []
+
+    for service in services {
+        var defaultGroupQuery: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrSynchronizable: kSecAttrSynchronizableAny
+        ]
+        SecItemDelete(defaultGroupQuery as CFDictionary)
+
+        for accessGroup in accessGroups {
+            defaultGroupQuery[kSecAttrAccessGroup] = accessGroup
+            SecItemDelete(defaultGroupQuery as CFDictionary)
+        }
+    }
+}
 
 extension UIApplication: LegacyBackgroundFetching {}
 
@@ -124,6 +160,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // One-time cleanup build: remove SideStore authentication and Anisette
         // state only. App databases, pairing files, and guest containers remain
         // untouched.
+        purgeSideStoreKeychainServices()
         Keychain.shared.clearAll()
         AnisetteConfigManager.shared.deleteConfigFile()
         if let anisetteDirectory = OnDeviceAnisetteManager.shared.baseAnisetteDirectory {
