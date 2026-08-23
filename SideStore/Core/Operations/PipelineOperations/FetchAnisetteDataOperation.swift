@@ -165,12 +165,34 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
         self.setProgress(60)
         self.verboseLog("[FetchAnisetteDataOperation] Anisette URL: \(self.url!.absoluteString)")
 
+        self.migrateOnDeviceAnisetteStateIfNeeded()
+
         if let identifier = AnisetteDataManager.shared.anisetteIdentifier,
            let adiPb = AnisetteDataManager.shared.anisetteAdiBlob {
             return try await self.fetchAnisetteV3(identifier, adiPb)
         } else {
             return try await self.provision()
         }
+    }
+
+    private func migrateOnDeviceAnisetteStateIfNeeded() {
+        guard let identifier = AnisetteDataManager.shared.anisetteIdentifier else { return }
+
+        if let decoded = Data(base64Encoded: identifier), decoded.count == 16 {
+            return
+        }
+
+        if let uuid = UUID(uuidString: identifier) {
+            var bytes = uuid.uuid
+            let decoded = Data(bytes: &bytes, count: 16)
+            AnisetteDataManager.shared.anisetteIdentifier = decoded.base64EncodedString()
+        } else {
+            AnisetteDataManager.shared.anisetteIdentifier = nil
+        }
+
+        // ODA provisioning data is tied to the UUID representation and cannot
+        // be reused by the legacy remote Anisette provisioning flow.
+        AnisetteDataManager.shared.anisetteAdiBlob = nil
     }
 
     private func getAnisetteServerUrl(excluding: Set<String> = []) async throws -> String {
