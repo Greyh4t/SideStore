@@ -7,8 +7,19 @@
 //
 
 import Foundation
+import Security
 private import KeychainAccess
 @preconcurrency import AltSign
+
+@_silgen_name("SecTaskCreateFromSelf")
+private func SecTaskCreateFromSelf(_ allocator: CFAllocator?) -> CFTypeRef
+
+@_silgen_name("SecTaskCopyValueForEntitlement")
+private func SecTaskCopyValueForEntitlement(
+    _ task: CFTypeRef,
+    _ entitlement: CFString,
+    _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?
+) -> Unmanaged<CFTypeRef>?
 
 @propertyWrapper
 public struct KeychainItem<Value>
@@ -19,16 +30,16 @@ public struct KeychainItem<Value>
         get {
             switch Value.self
             {
-            case is Data.Type: return try? Keychain.shared.keychain.getData(self.key) as? Value
-            case is String.Type: return try? Keychain.shared.keychain.getString(self.key) as? Value
+            case is Data.Type: return Keychain.shared.data(forKey: self.key) as? Value
+            case is String.Type: return Keychain.shared.string(forKey: self.key) as? Value
             default: return nil
             }
         }
         set {
             switch Value.self
             {
-            case is Data.Type: Keychain.shared.keychain[data: self.key] = newValue as? Data
-            case is String.Type: Keychain.shared.keychain[self.key] = newValue as? String
+            case is Data.Type: Keychain.shared.setData(newValue as? Data, forKey: self.key)
+            case is String.Type: Keychain.shared.setString(newValue as? String, forKey: self.key)
             default: break
             }
         }
@@ -43,10 +54,16 @@ public struct KeychainItem<Value>
 public class Keychain
 {
     public static let shared = Keychain()
-    
-    fileprivate let keychain = KeychainAccess.Keychain(service: Bundle.Info.appbundleIdentifier)
-                                            .accessibility(.afterFirstUnlock)
-                                            .synchronizable(true)
+
+    private let sideStoreLegacyKeychain: KeychainAccess.Keychain
+    private let legacyKeychain: KeychainAccess.Keychain
+    fileprivate let keychain: KeychainAccess.Keychain
+
+    private static let allKeys = [
+        "appleIDEmailAddress", "appleIDPassword", "appleIDAdsid", "appleIDXcodeToken",
+        "signingCertificate", "signingCertificatePassword", "signingCertificatePrivateKey",
+        "signingCertificateSerialNumber", "identifier", "adiPb"
+    ]
     
     @KeychainItem(key: "appleIDEmailAddress")
     public var appleIDEmailAddress: String?
@@ -85,19 +102,91 @@ public class Keychain
     // MARK: - Dynamic Imported Certificates Storage
 
     public subscript(certificateSerial serial: String) -> Data? {
-        get { try? self.keychain.getData("importedCert_" + serial) }
-        set {
-            if let data = newValue {
-                try? self.keychain.set(data, key: "importedCert_" + serial)
-            } else {
-                try? self.keychain.remove("importedCert_" + serial)
+        get { self.data(forKey: "importedCert_" + serial) }
+        set { self.setData(newValue, forKey: "importedCert_" + serial) }
+    }
+    
+    private init() {
+        let service = Bundle.Info.appbundleIdentifier
+        self.sideStoreLegacyKeychain = KeychainAccess.Keychain(service: "com.SideStore.SideStore")
+            .accessibility(.afterFirstUnlock)
+            .synchronizable(true)
+        self.legacyKeychain = KeychainAccess.Keychain(service: service)
+            .accessibility(.afterFirstUnlock)
+            .synchronizable(true)
+
+        if let accessGroup = Self.liveContainerSharedAccessGroup() {
+            self.keychain = KeychainAccess.Keychain(service: service, accessGroup: accessGroup)
+                .accessibility(.afterFirstUnlock)
+                .synchronizable(true)
+            self.migrateItemsToSharedKeychain()
+        } else {
+            self.keychain = self.legacyKeychain
+        }
+
+        self.migrateLegacyKeychainItems()
+    }
+
+    private static func liveContainerSharedAccessGroup() -> String? {
+        let task = SecTaskCreateFromSelf(nil)
+        guard let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil)?.takeRetainedValue(),
+              let groups = value as? [String]
+        else {
+            return nil
+        }
+        return groups.first { $0.hasSuffix(".com.kdt.livecontainer.shared") }
+    }
+
+    private func migrateItemsToSharedKeychain() {
+        for key in Self.allKeys where (try? self.keychain.getData(key)) == nil && (try? self.keychain.getString(key)) == nil {
+            if let data = try? self.legacyKeychain.getData(key) {
+                try? self.keychain.set(data, key: key)
+            } else if let string = try? self.legacyKeychain.getString(key) {
+                try? self.keychain.set(string, key: key)
+            } else if let data = try? self.sideStoreLegacyKeychain.getData(key) {
+                try? self.keychain.set(data, key: key)
+            } else if let string = try? self.sideStoreLegacyKeychain.getString(key) {
+                try? self.keychain.set(string, key: key)
             }
         }
     }
-    
-    private init()
-    {
-        self.migrateLegacyKeychainItems()
+
+    fileprivate func data(forKey key: String) -> Data? {
+        if let value = try? self.keychain.getData(key) {
+            return value
+        }
+        guard let value = (try? self.legacyKeychain.getData(key)) ?? (try? self.sideStoreLegacyKeychain.getData(key)) else { return nil }
+        try? self.keychain.set(value, key: key)
+        return value
+    }
+
+    fileprivate func string(forKey key: String) -> String? {
+        if let value = try? self.keychain.getString(key) {
+            return value
+        }
+        guard let value = (try? self.legacyKeychain.getString(key)) ?? (try? self.sideStoreLegacyKeychain.getString(key)) else { return nil }
+        try? self.keychain.set(value, key: key)
+        return value
+    }
+
+    fileprivate func setData(_ value: Data?, forKey key: String) {
+        self.keychain[data: key] = value
+        if value == nil && self.keychain !== self.legacyKeychain {
+            self.legacyKeychain[data: key] = nil
+        }
+        if value == nil {
+            self.sideStoreLegacyKeychain[data: key] = nil
+        }
+    }
+
+    fileprivate func setString(_ value: String?, forKey key: String) {
+        self.keychain[key] = value
+        if value == nil && self.keychain !== self.legacyKeychain {
+            self.legacyKeychain[key] = nil
+        }
+        if value == nil {
+            self.sideStoreLegacyKeychain[key] = nil
+        }
     }
     
     private func migrateLegacyKeychainItems()
@@ -169,6 +258,10 @@ public class Keychain
     {
         debugLog("[Keychain] Clearing all Keychain items related to this instance...")
         try? self.keychain.removeAll()
+        if self.keychain !== self.legacyKeychain {
+            try? self.legacyKeychain.removeAll()
+        }
+        try? self.sideStoreLegacyKeychain.removeAll()
         debugLog("[Keychain] All Keychain items and in-memory session/team cleared.")
     }
 }

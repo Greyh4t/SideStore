@@ -129,7 +129,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         UserDefaults.registerDefaults()
         
         // Perform one-time maintenance tasks (e.g. Keychain clearance for 0.6.4*) before initializing services
-        MaintenanceManager.shared.performMaintenanceIfNeeded()
+        // LiveContainer and LiveProcess share credentials through a dedicated
+        // keychain access group. Do not erase those credentials during the
+        // standalone SideStore 0.6.4 maintenance pass.
+        if !Bundle.Info.appbundleIdentifier.lowercased().contains("livecontainer") {
+            MaintenanceManager.shared.performMaintenanceIfNeeded()
+        }
 
         // Trigger daily boot sync for Anisette servers if needed
         Task.detached {
@@ -151,6 +156,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             debugLog("[AppDelegate] Boot sequence starting...")
             await AppBootManager.shared.performBootSequence()
             debugLog("[AppDelegate] Boot sequence completed.")
+            NotificationCenter.default.post(
+                name: Notification.Name("io.sidestore.BootSequenceDidFinish"),
+                object: nil
+            )
         }
         
         
