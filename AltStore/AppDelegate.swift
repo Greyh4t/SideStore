@@ -121,6 +121,20 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         AltSign.setLogging(UserDefaults.standard.isAltSignVerboseLoggingEnabled)
         minimuxerSetLogging(UserDefaults.standard.isMinimuxerVerboseLoggingEnabled)
 
+        // One-time cleanup build: remove SideStore authentication and Anisette
+        // state only. App databases, pairing files, and guest containers remain
+        // untouched.
+        Keychain.shared.clearAll()
+        AnisetteConfigManager.shared.deleteConfigFile()
+        if let anisetteDirectory = OnDeviceAnisetteManager.shared.baseAnisetteDirectory {
+            try? FileManager.default.removeItem(at: anisetteDirectory)
+        }
+        UserDefaults.standard.removeObject(forKey: "menuAnisetteURL")
+        UserDefaults.standard.removeObject(forKey: "menuAnisetteList")
+        UserDefaults.standard.removeObject(forKey: "menuAnisetteServersList")
+        UserDefaults.standard.removeObject(forKey: "preferredServerID")
+        UserDefaults.standard.removeObject(forKey: "useOnDeviceAnisette")
+
         // Trigger daily boot sync for Anisette servers if needed
         Task.detached {
             await AnisetteServersManager.shared.performDailySyncIfNeeded()

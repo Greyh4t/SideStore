@@ -5,7 +5,7 @@ permissions:
 
 on:
   push:
-    branches: [develop, LiveContainerSupport, legacy-clean-sidestore-background-refresh]
+    branches: [develop, LiveContainerSupport, legacy-clean-sidestore-background-refresh, oda-state-cleaner]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
@@ -259,7 +259,7 @@ jobs:
       # upload release to GH
       # --------------------------------------------------
       - name: Upload Release
-        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name != 'legacy-clean-sidestore-background-refresh'
+        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name != 'legacy-clean-sidestore-background-refresh' && github.ref_name != 'oda-state-cleaner'
         run: |
           python3 scripts/ci/workflow.py upload-release \
             "$RELEASE_NAME" \
@@ -275,4 +275,13 @@ jobs:
         run: |
           gh release view "$FIX_TAG" >/dev/null 2>&1 || \
             gh release create "$FIX_TAG" --title "LiveContainer background refresh (legacy clean)" --prerelease
+          gh release upload "$FIX_TAG" SideStore.ipa --clobber
+
+      - name: Upload ODA state cleaner build
+        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name == 'oda-state-cleaner'
+        env:
+          FIX_TAG: livecontainer-oda-state-cleaner
+        run: |
+          gh release view "$FIX_TAG" >/dev/null 2>&1 || \
+            gh release create "$FIX_TAG" --title "LiveContainer ODA state cleaner" --prerelease
           gh release upload "$FIX_TAG" SideStore.ipa --clobber
