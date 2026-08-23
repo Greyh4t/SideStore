@@ -167,6 +167,13 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
 
         if let identifier = AnisetteDataManager.shared.anisetteIdentifier,
            let adiPb = AnisetteDataManager.shared.anisetteAdiBlob {
+            guard let decodedIdentifier = Data(base64Encoded: identifier),
+                  decodedIdentifier.count == 16
+            else {
+                AnisetteDataManager.shared.anisetteIdentifier = nil
+                AnisetteDataManager.shared.anisetteAdiBlob = nil
+                return try await self.provision()
+            }
             return try await self.fetchAnisetteV3(identifier, adiPb)
         } else {
             return try await self.provision()
