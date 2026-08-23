@@ -25,9 +25,14 @@ final class PairingFileManager: NSObject {
     nonisolated func fetchPairingFile() -> String? {
         let fm = FileManager.default
         let documentsPath = fm.documentsDirectory.appendingPathComponent("/\(Self.pairingFileName)")
-        if fm.fileExists(atPath: documentsPath.path),
-           let contents = try? String(contentsOf: documentsPath), !contents.isEmpty {
-            return contents
+        if fm.fileExists(atPath: documentsPath.path) {
+            try? fm.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: documentsPath.path
+            )
+            if let contents = try? String(contentsOf: documentsPath), !contents.isEmpty {
+                return contents
+            }
         }
         if let url = Bundle.main.url(forResource: "ALTPairingFile", withExtension: "mobiledevicepairing"),
            fm.fileExists(atPath: url.path),
@@ -46,6 +51,10 @@ final class PairingFileManager: NSObject {
             try? fm.removeItem(at: documentsPath)
         }
         try contents.write(to: documentsPath, atomically: true, encoding: .utf8)
+        try fm.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: documentsPath.path
+        )
         debugLog("[PairingFile] Successfully copied and saved pairing file to: \(documentsPath.path)")
         UserDefaults.standard.isPairingReset = false
     }

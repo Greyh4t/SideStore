@@ -1,15 +1,17 @@
 name: Nightly SideStore Build
 
+permissions:
+  contents: write
+
 on:
   push:
-    branches: [develop, LiveContainerSupport]
+    branches: [develop, LiveContainerSupport, legacy-clean-sidestore-background-refresh]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
       - '.editorconfig'
       - '.gitignore'
       - '.gitmodules'
-      - '.github/**'
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
@@ -257,7 +259,7 @@ jobs:
       # upload release to GH
       # --------------------------------------------------
       - name: Upload Release
-        if: steps.build_gate.outputs.should_skip != 'true'
+        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name != 'legacy-clean-sidestore-background-refresh'
         run: |
           python3 scripts/ci/workflow.py upload-release \
             "$RELEASE_NAME" \
@@ -265,3 +267,12 @@ jobs:
             "$GITHUB_SHA" \
             "$GITHUB_REPOSITORY" \
             "$UPSTREAM_CHANNEL"
+
+      - name: Upload LiveContainer legacy clean build
+        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name == 'legacy-clean-sidestore-background-refresh'
+        env:
+          FIX_TAG: livecontainer-background-refresh-legacy-clean
+        run: |
+          gh release view "$FIX_TAG" >/dev/null 2>&1 || \
+            gh release create "$FIX_TAG" --title "LiveContainer background refresh (legacy clean)" --prerelease
+          gh release upload "$FIX_TAG" SideStore.ipa --clobber

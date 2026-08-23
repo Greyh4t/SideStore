@@ -7,8 +7,19 @@
 //
 
 import Foundation
+import Security
 private import KeychainAccess
 @preconcurrency import AltSign
+
+@_silgen_name("SecTaskCreateFromSelf")
+private func SecTaskCreateFromSelf(_ allocator: CFAllocator?) -> CFTypeRef
+
+@_silgen_name("SecTaskCopyValueForEntitlement")
+private func SecTaskCopyValueForEntitlement(
+    _ task: CFTypeRef,
+    _ entitlement: CFString,
+    _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?
+) -> Unmanaged<CFTypeRef>?
 
 @propertyWrapper
 public struct KeychainItem<Value>
@@ -43,10 +54,16 @@ public struct KeychainItem<Value>
 public class Keychain
 {
     public static let shared = Keychain()
-    
-    fileprivate let keychain = KeychainAccess.Keychain(service: Bundle.Info.appbundleIdentifier)
-                                            .accessibility(.afterFirstUnlock)
-                                            .synchronizable(true)
+
+    private let containerKeychain: KeychainAccess.Keychain
+    private let standaloneSideStoreKeychain: KeychainAccess.Keychain
+    fileprivate let keychain: KeychainAccess.Keychain
+
+    private static let migratableKeys = [
+        "appleIDEmailAddress", "appleIDPassword", "appleIDAdsid", "appleIDXcodeToken",
+        "signingCertificate", "signingCertificatePassword", "signingCertificatePrivateKey",
+        "signingCertificateSerialNumber", "identifier", "adiPb"
+    ]
     
     @KeychainItem(key: "appleIDEmailAddress")
     public var appleIDEmailAddress: String?
@@ -95,9 +112,49 @@ public class Keychain
         }
     }
     
-    private init()
-    {
+    private init() {
+        let service = Bundle.Info.appbundleIdentifier
+        self.containerKeychain = KeychainAccess.Keychain(service: service)
+            .accessibility(.afterFirstUnlock)
+            .synchronizable(true)
+        self.standaloneSideStoreKeychain = KeychainAccess.Keychain(service: "com.SideStore.SideStore")
+            .accessibility(.afterFirstUnlock)
+            .synchronizable(true)
+
+        if let accessGroup = Self.liveContainerSharedAccessGroup() {
+            self.keychain = KeychainAccess.Keychain(service: service, accessGroup: accessGroup)
+                .accessibility(.afterFirstUnlock)
+                .synchronizable(true)
+            self.migrateCredentialsToSharedKeychain()
+        } else {
+            self.keychain = self.containerKeychain
+        }
+
         self.migrateLegacyKeychainItems()
+    }
+
+    private static func liveContainerSharedAccessGroup() -> String? {
+        let task = SecTaskCreateFromSelf(nil)
+        guard let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil)?.takeRetainedValue(),
+              let groups = value as? [String]
+        else {
+            return nil
+        }
+        return groups.first { $0.hasSuffix(".com.kdt.livecontainer.shared") }
+    }
+
+    private func migrateCredentialsToSharedKeychain() {
+        for key in Self.migratableKeys {
+            guard (try? self.keychain.getData(key)) == nil,
+                  (try? self.keychain.getString(key)) == nil
+            else { continue }
+
+            if let data = (try? self.containerKeychain.getData(key)) ?? (try? self.standaloneSideStoreKeychain.getData(key)) {
+                try? self.keychain.set(data, key: key)
+            } else if let string = (try? self.containerKeychain.getString(key)) ?? (try? self.standaloneSideStoreKeychain.getString(key)) {
+                try? self.keychain.set(string, key: key)
+            }
+        }
     }
     
     private func migrateLegacyKeychainItems()
