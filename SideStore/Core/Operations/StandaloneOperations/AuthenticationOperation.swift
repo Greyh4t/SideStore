@@ -45,6 +45,10 @@ private class AnisetteDataProvider {
         self.lastFetchedData = anisetteData
         return anisetteData
     }
+
+    func invalidate() {
+        self.lastFetchedData = nil
+    }
 }
 
 typealias AuthenticationError = AuthenticationErrorCode.Error
@@ -284,15 +288,17 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
             self.verboseLog("[AuthenticationOperation] Authenticating Apple ID with tokens...")
 
             do {
-                let anisetteData = try await self.anisetteDataProvider.getAnisetteData()
-                let xcodeVersion = await AnisetteConfigManager.shared.resolvedXcodeVersion()
+                return try await self.withOnDeviceAnisetteRecovery {
+                    let anisetteData = try await self.anisetteDataProvider.getAnisetteData()
+                    let xcodeVersion = await AnisetteConfigManager.shared.resolvedXcodeVersion()
 
-                return try await AuthManager.shared.authenticateWithToken(
-                    adsid: adsid,
-                    xcodeToken: xcodeToken, 
-                    anisetteData: anisetteData, 
-                    xcodeVersion: xcodeVersion
-                )
+                    return try await AuthManager.shared.authenticateWithToken(
+                        adsid: adsid,
+                        xcodeToken: xcodeToken,
+                        anisetteData: anisetteData,
+                        xcodeVersion: xcodeVersion
+                    )
+                }
             } catch {
                 self.debugLog("[AuthenticationOperation] Token authentication failed: \(error)")
             }
@@ -304,13 +310,34 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
         {
             self.debugLog("[AuthenticationOperation] Authenticating Apple ID with saved password...")
             do {
-                return try await self.authenticate(appleID: appleID, password: password)
+                return try await self.withOnDeviceAnisetteRecovery {
+                    try await self.authenticate(appleID: appleID, password: password)
+                }
             } catch {
                 self.debugLog("[AuthenticationOperation] Saved password authentication failed: \(error)")
             }
         }
 
         return nil
+    }
+
+    private func withOnDeviceAnisetteRecovery<T>(_ operation: () async throws -> T) async throws -> T {
+        do {
+            return try await operation()
+        } catch {
+            let nsError = error as NSError
+            guard UserDefaults.standard.useOnDeviceAnisette,
+                  nsError.domain == "AnisetteKit",
+                  nsError.code == -45061
+            else {
+                throw error
+            }
+
+            AnisetteDataManager.shared.anisetteAdiBlob = nil
+            AnisetteDataManager.shared.anisetteIdentifier = nil
+            self.anisetteDataProvider.invalidate()
+            return try await operation()
+        }
     }
 
     private func authenticationLoop() async throws -> (account: ALTAccount, session: ALTAppleAPISession) {
