@@ -297,27 +297,9 @@ public class Keychain
             tokenCredentials?.adsid,
             tokenCredentials?.token
         )
-        var verifiedStores = 0
-        for entry in stores {
-            do {
-                if let email = selected.email { try entry.keychain.set(email, key: "appleIDEmailAddress") }
-                if let password = selected.password { try entry.keychain.set(password, key: "appleIDPassword") }
-                if let adsid = selected.adsid { try entry.keychain.set(adsid, key: "appleIDAdsid") }
-                if let token = selected.token { try entry.keychain.set(token, key: "appleIDXcodeToken") }
-
-                let storedEmail = try entry.keychain.getString("appleIDEmailAddress")
-                let storedPassword = try entry.keychain.getString("appleIDPassword")
-                let storedADSID = try entry.keychain.getString("appleIDAdsid")
-                let storedToken = try entry.keychain.getString("appleIDXcodeToken")
-                let passwordVerified = selected.email == nil || (storedEmail == selected.email && storedPassword == selected.password)
-                let tokenVerified = selected.adsid == nil || (storedADSID == selected.adsid && storedToken == selected.token)
-                debugLog("[CredentialRecovery] \(entry.label),passwordVerified=\(passwordVerified),tokenVerified=\(tokenVerified)")
-                if passwordVerified && tokenVerified { verifiedStores += 1 }
-            } catch {
-                debugLog("[CredentialRecovery] \(entry.label),writeError=\(error)")
-            }
-        }
-
+        // Compatibility stores above are read-only sources. Always write through
+        // SideStore's current Keychain properties so future official builds read
+        // the same canonical service, keys, access group, and accessibility.
         if let email = selected.email { self.appleIDEmailAddress = email }
         if let password = selected.password { self.appleIDPassword = password }
         if let adsid = selected.adsid { self.appleIDAdsid = adsid }
@@ -325,8 +307,8 @@ public class Keychain
 
         let activePasswordPair = self.appleIDEmailAddress != nil && self.appleIDPassword != nil
         let activeTokenPair = self.appleIDAdsid != nil && self.appleIDXcodeToken != nil
-        debugLog("[CredentialRecovery] completed,verifiedStores=\(verifiedStores)/\(stores.count),activePasswordPair=\(activePasswordPair),activeTokenPair=\(activeTokenPair)")
-        return verifiedStores > 0 && (activePasswordPair || activeTokenPair)
+        debugLog("[CredentialRecovery] canonical write completed,service=\(Bundle.Info.appbundleIdentifier),activePasswordPair=\(activePasswordPair),activeTokenPair=\(activeTokenPair)")
+        return activePasswordPair || activeTokenPair
     }
 
     private func migrateItemsToSharedKeychain() {
