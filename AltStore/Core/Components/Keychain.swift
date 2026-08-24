@@ -141,8 +141,16 @@ public class Keychain
         return groups
     }
 
-    private func anisetteRecoveryKeychains() -> [(label: String, keychain: KeychainAccess.Keychain)] {
-        let services = Set([Bundle.Info.appbundleIdentifier, "com.kdt.livecontainer", "com.SideStore.SideStore"])
+    private func recoveryKeychains() -> [(label: String, keychain: KeychainAccess.Keychain)] {
+        let services = Set([
+            Bundle.Info.appbundleIdentifier,
+            Bundle.main.bundleIdentifier ?? "",
+            "com.kdt.livecontainer",
+            "com.kdt.LiveContainer",
+            "com.kdt.LiveContainer2",
+            "com.kdt.LiveContainer3",
+            "com.SideStore.SideStore"
+        ].filter { !$0.isEmpty })
         var result: [(String, KeychainAccess.Keychain)] = []
 
         for service in services.sorted() {
@@ -185,7 +193,7 @@ public class Keychain
 
         let replacement = Data(bytes).base64EncodedString()
         var verifiedStores = 0
-        let stores = self.anisetteRecoveryKeychains()
+        let stores = self.recoveryKeychains()
 
         for entry in stores {
             do {
@@ -211,6 +219,70 @@ public class Keychain
         let activeValid = activeIdentifier == replacement && Data(base64Encoded: activeIdentifier ?? "")?.count == 16 && self.adiPb == nil
         debugLog("[KeychainRecovery] completed,verifiedStores=\(verifiedStores)/\(stores.count),activeStoreValid=\(activeValid),state=\(self.anisetteStateSummary())")
         return verifiedStores > 0 && activeValid
+    }
+
+    @discardableResult
+    public func recoverAuthenticationCredentials() -> Bool {
+        typealias Credentials = (email: String?, password: String?, adsid: String?, token: String?)
+        var passwordCredentials: Credentials?
+        var tokenCredentials: Credentials?
+        let stores = self.recoveryKeychains()
+
+        for entry in stores {
+            let credentials: Credentials = (
+                try? entry.keychain.getString("appleIDEmailAddress"),
+                try? entry.keychain.getString("appleIDPassword"),
+                try? entry.keychain.getString("appleIDAdsid"),
+                try? entry.keychain.getString("appleIDXcodeToken")
+            )
+            let hasPasswordPair = credentials.email != nil && credentials.password != nil
+            let hasTokenPair = credentials.adsid != nil && credentials.token != nil
+            debugLog("[CredentialRecovery] \(entry.label),hasEmail=\(credentials.email != nil),hasPassword=\(credentials.password != nil),hasADSID=\(credentials.adsid != nil),hasXcodeToken=\(credentials.token != nil),passwordPair=\(hasPasswordPair),tokenPair=\(hasTokenPair)")
+            if passwordCredentials == nil && hasPasswordPair {
+                passwordCredentials = credentials
+            }
+            if tokenCredentials == nil && hasTokenPair {
+                tokenCredentials = credentials
+            }
+        }
+
+        guard passwordCredentials != nil || tokenCredentials != nil else {
+            debugLog("[CredentialRecovery] No complete credential pair found in \(stores.count) candidate stores")
+            return false
+        }
+
+        let selected: Credentials = (
+            passwordCredentials?.email,
+            passwordCredentials?.password,
+            tokenCredentials?.adsid,
+            tokenCredentials?.token
+        )
+        var verifiedStores = 0
+        for entry in stores {
+            do {
+                if let email = selected.email { try entry.keychain.set(email, key: "appleIDEmailAddress") }
+                if let password = selected.password { try entry.keychain.set(password, key: "appleIDPassword") }
+                if let adsid = selected.adsid { try entry.keychain.set(adsid, key: "appleIDAdsid") }
+                if let token = selected.token { try entry.keychain.set(token, key: "appleIDXcodeToken") }
+
+                let passwordVerified = selected.email == nil || ((try entry.keychain.getString("appleIDEmailAddress")) == selected.email && (try entry.keychain.getString("appleIDPassword")) == selected.password)
+                let tokenVerified = selected.adsid == nil || ((try entry.keychain.getString("appleIDAdsid")) == selected.adsid && (try entry.keychain.getString("appleIDXcodeToken")) == selected.token)
+                debugLog("[CredentialRecovery] \(entry.label),passwordVerified=\(passwordVerified),tokenVerified=\(tokenVerified)")
+                if passwordVerified && tokenVerified { verifiedStores += 1 }
+            } catch {
+                debugLog("[CredentialRecovery] \(entry.label),writeError=\(error)")
+            }
+        }
+
+        if let email = selected.email { self.appleIDEmailAddress = email }
+        if let password = selected.password { self.appleIDPassword = password }
+        if let adsid = selected.adsid { self.appleIDAdsid = adsid }
+        if let token = selected.token { self.appleIDXcodeToken = token }
+
+        let activePasswordPair = self.appleIDEmailAddress != nil && self.appleIDPassword != nil
+        let activeTokenPair = self.appleIDAdsid != nil && self.appleIDXcodeToken != nil
+        debugLog("[CredentialRecovery] completed,verifiedStores=\(verifiedStores)/\(stores.count),activePasswordPair=\(activePasswordPair),activeTokenPair=\(activeTokenPair)")
+        return verifiedStores > 0 && (activePasswordPair || activeTokenPair)
     }
 
     private func migrateItemsToSharedKeychain() {
