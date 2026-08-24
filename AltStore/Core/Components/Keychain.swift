@@ -308,6 +308,32 @@ public class Keychain
         let activePasswordPair = self.appleIDEmailAddress != nil && self.appleIDPassword != nil
         let activeTokenPair = self.appleIDAdsid != nil && self.appleIDXcodeToken != nil
         debugLog("[CredentialRecovery] canonical write completed,service=\(Bundle.Info.appbundleIdentifier),activePasswordPair=\(activePasswordPair),activeTokenPair=\(activeTokenPair)")
+
+        if activePasswordPair || activeTokenPair {
+            let legacyValues: [(key: String, value: String?)] = [
+                ("appleIDEmailAddress", selected.email),
+                ("appleIDPassword", selected.password),
+                ("appleIDAdsid", selected.adsid),
+                ("appleIDXcodeToken", selected.token)
+            ]
+            for entry in stores where entry.label.hasPrefix("service=com.rileytestut.AltStore,") {
+                do {
+                    var removedKeys = 0
+                    for legacyValue in legacyValues {
+                        guard let expectedValue = legacyValue.value,
+                              try entry.keychain.getString(legacyValue.key) == expectedValue
+                        else { continue }
+                        try entry.keychain.remove(legacyValue.key)
+                        if try entry.keychain.getString(legacyValue.key) == nil {
+                            removedKeys += 1
+                        }
+                    }
+                    debugLog("[CredentialRecovery] legacy AltStore cleanup \(entry.label),removedMatchingAuthenticationKeys=\(removedKeys)")
+                } catch {
+                    debugLog("[CredentialRecovery] legacy AltStore cleanup \(entry.label),error=\(error)")
+                }
+            }
+        }
         return activePasswordPair || activeTokenPair
     }
 
