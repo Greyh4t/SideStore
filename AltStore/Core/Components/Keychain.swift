@@ -149,7 +149,8 @@ public class Keychain
             "com.kdt.LiveContainer",
             "com.kdt.LiveContainer2",
             "com.kdt.LiveContainer3",
-            "com.SideStore.SideStore"
+            "com.SideStore.SideStore",
+            "com.rileytestut.AltStore"
         ].filter { !$0.isEmpty })
         var result: [(String, KeychainAccess.Keychain)] = []
 
