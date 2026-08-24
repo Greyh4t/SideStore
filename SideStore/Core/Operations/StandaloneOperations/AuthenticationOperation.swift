@@ -277,9 +277,15 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
     }
     
     private func silentSignIn() async throws -> (ALTAccount, ALTAppleAPISession)? {
+        let adsid = AuthManager.shared.adsid
+        let xcodeToken = AuthManager.shared.xcodeToken
+        let appleID = AuthManager.shared.currentAppleID
+        let password = AuthManager.shared.password
+        self.debugLog("[AuthenticationOperation] Silent auth state: process=\(ProcessInfo.processInfo.processName),bundleID=\(Bundle.main.bundleIdentifier ?? \"nil\"),hasEmail=\(appleID != nil),hasPassword=\(password != nil),hasADSID=\(adsid != nil),hasXcodeToken=\(xcodeToken != nil),anisette=\(Keychain.shared.anisetteStateSummary())")
+
         // Try silent auth using Keychain Token
-        if let adsid = AuthManager.shared.adsid, 
-           let xcodeToken = AuthManager.shared.xcodeToken 
+        if let adsid,
+           let xcodeToken
         {
             self.verboseLog("[AuthenticationOperation] Authenticating Apple ID with tokens...")
 
@@ -299,8 +305,8 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
         }
         
         // Try silent auth using Keychain Password
-        if let appleID = AuthManager.shared.currentAppleID, 
-           let password = AuthManager.shared.password 
+        if let appleID,
+           let password
         {
             self.debugLog("[AuthenticationOperation] Authenticating Apple ID with saved password...")
             do {
@@ -310,6 +316,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
             }
         }
 
+        self.debugLog("[AuthenticationOperation] Silent auth exhausted all available credential paths")
         return nil
     }
 
