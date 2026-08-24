@@ -176,6 +176,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
         } else {
             try await self.authenticationLoop()
         }
+        self.debugLog("[Authentication] startAuthentication received session: hasDSID=\(!session.dsid.isEmpty),hasAuthToken=\(!session.authToken.isEmpty)")
         self.context.session = session
         AuthManager.shared.session = session
 
@@ -288,7 +289,6 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
             self.debugLog("[AuthenticationOperation] Multi-store credential recovery completed recovered=\(recovered)")
             self.debugLog("[AuthenticationOperation] Credential inventory after recovery: \(Keychain.shared.authenticationCredentialInventorySummary())")
         }
-        self.debugLog("[Authentication] startAuthentication received session: hasDSID=\(!session.dsid.isEmpty),hasAuthToken=\(!session.authToken.isEmpty)")
         let adsid = AuthManager.shared.adsid
         let xcodeToken = AuthManager.shared.xcodeToken
         let appleID = AuthManager.shared.currentAppleID
