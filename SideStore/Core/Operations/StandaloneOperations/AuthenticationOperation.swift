@@ -281,7 +281,8 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
         let xcodeToken = AuthManager.shared.xcodeToken
         let appleID = AuthManager.shared.currentAppleID
         let password = AuthManager.shared.password
-        self.debugLog("[AuthenticationOperation] Silent auth state: process=\(ProcessInfo.processInfo.processName),bundleID=\(Bundle.main.bundleIdentifier ?? \"nil\"),hasEmail=\(appleID != nil),hasPassword=\(password != nil),hasADSID=\(adsid != nil),hasXcodeToken=\(xcodeToken != nil),anisette=\(Keychain.shared.anisetteStateSummary())")
+        let bundleID = Bundle.main.bundleIdentifier ?? "nil"
+        self.debugLog("[AuthenticationOperation] Silent auth state: process=\(ProcessInfo.processInfo.processName),bundleID=\(bundleID),hasEmail=\(appleID != nil),hasPassword=\(password != nil),hasADSID=\(adsid != nil),hasXcodeToken=\(xcodeToken != nil),anisette=\(Keychain.shared.anisetteStateSummary())")
 
         // Try silent auth using Keychain Token
         if let adsid,

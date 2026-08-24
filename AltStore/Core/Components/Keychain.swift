@@ -169,8 +169,10 @@ public class Keychain
     public func anisetteStateSummary() -> String {
         let identifier = self.identifier
         let decodedLength = identifier.flatMap { Data(base64Encoded: $0)?.count }
-        let isUUID = identifier.flatMap(UUID.init(uuidString:)) != nil
-        return "service=\(Bundle.Info.appbundleIdentifier),bundleID=\(Bundle.main.bundleIdentifier ?? \"nil\"),accessGroups=\(Self.keychainAccessGroups()),identifierPresent=\(identifier != nil),identifierLength=\(identifier?.count ?? 0),identifierIsUUID=\(isUUID),identifierBase64Bytes=\(decodedLength.map { String($0) } ?? \"nil\"),adiPresent=\(self.adiPb != nil),adiLength=\(self.adiPb?.count ?? 0)"
+        let isUUID = identifier.flatMap { UUID(uuidString: $0) } != nil
+        let bundleID = Bundle.main.bundleIdentifier ?? "nil"
+        let decodedLengthDescription = decodedLength.map(String.init) ?? "nil"
+        return "service=\(Bundle.Info.appbundleIdentifier),bundleID=\(bundleID),accessGroups=\(Self.keychainAccessGroups()),identifierPresent=\(identifier != nil),identifierLength=\(identifier?.count ?? 0),identifierIsUUID=\(isUUID),identifierBase64Bytes=\(decodedLengthDescription),adiPresent=\(self.adiPb != nil),adiLength=\(self.adiPb?.count ?? 0)"
     }
 
     @discardableResult

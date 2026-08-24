@@ -165,7 +165,9 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
         }
         self.url = url
         self.setProgress(60)
-        self.debugLog("[FetchAnisetteDataOperation] Runtime state: process=\(ProcessInfo.processInfo.processName),hasLCHome=\(ProcessInfo.processInfo.environment[\"LC_HOME_PATH\"] != nil),hasLPHome=\(ProcessInfo.processInfo.environment[\"LP_HOME_PATH\"] != nil),anisetteURLHost=\(url.host ?? \"nil\"),keychain=\(Keychain.shared.anisetteStateSummary())")
+        let environment = ProcessInfo.processInfo.environment
+        let anisetteURLHost = url.host ?? "nil"
+        self.debugLog("[FetchAnisetteDataOperation] Runtime state: process=\(ProcessInfo.processInfo.processName),hasLCHome=\(environment["LC_HOME_PATH"] != nil),hasLPHome=\(environment["LP_HOME_PATH"] != nil),anisetteURLHost=\(anisetteURLHost),keychain=\(Keychain.shared.anisetteStateSummary())")
 
         if let identifier = AnisetteDataManager.shared.anisetteIdentifier,
            let adiPb = AnisetteDataManager.shared.anisetteAdiBlob {
