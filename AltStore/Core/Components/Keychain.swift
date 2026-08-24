@@ -265,8 +265,12 @@ public class Keychain
                 if let adsid = selected.adsid { try entry.keychain.set(adsid, key: "appleIDAdsid") }
                 if let token = selected.token { try entry.keychain.set(token, key: "appleIDXcodeToken") }
 
-                let passwordVerified = selected.email == nil || ((try entry.keychain.getString("appleIDEmailAddress")) == selected.email && (try entry.keychain.getString("appleIDPassword")) == selected.password)
-                let tokenVerified = selected.adsid == nil || ((try entry.keychain.getString("appleIDAdsid")) == selected.adsid && (try entry.keychain.getString("appleIDXcodeToken")) == selected.token)
+                let storedEmail = try entry.keychain.getString("appleIDEmailAddress")
+                let storedPassword = try entry.keychain.getString("appleIDPassword")
+                let storedADSID = try entry.keychain.getString("appleIDAdsid")
+                let storedToken = try entry.keychain.getString("appleIDXcodeToken")
+                let passwordVerified = selected.email == nil || (storedEmail == selected.email && storedPassword == selected.password)
+                let tokenVerified = selected.adsid == nil || (storedADSID == selected.adsid && storedToken == selected.token)
                 debugLog("[CredentialRecovery] \(entry.label),passwordVerified=\(passwordVerified),tokenVerified=\(tokenVerified)")
                 if passwordVerified && tokenVerified { verifiedStores += 1 }
             } catch {
