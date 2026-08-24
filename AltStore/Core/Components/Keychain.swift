@@ -128,13 +128,87 @@ public class Keychain
     }
 
     private static func liveContainerSharedAccessGroup() -> String? {
+        return self.keychainAccessGroups().first { $0.hasSuffix(".com.kdt.livecontainer.shared") }
+    }
+
+    private static func keychainAccessGroups() -> [String] {
         let task = SecTaskCreateFromSelf(nil)
         guard let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil)?.takeRetainedValue(),
               let groups = value as? [String]
         else {
-            return nil
+            return []
         }
-        return groups.first { $0.hasSuffix(".com.kdt.livecontainer.shared") }
+        return groups
+    }
+
+    private func anisetteRecoveryKeychains() -> [(label: String, keychain: KeychainAccess.Keychain)] {
+        let services = Set([Bundle.Info.appbundleIdentifier, "com.kdt.livecontainer", "com.SideStore.SideStore"])
+        var result: [(String, KeychainAccess.Keychain)] = []
+
+        for service in services.sorted() {
+            for synchronizable in [false, true] {
+                let keychain = KeychainAccess.Keychain(service: service)
+                    .accessibility(.afterFirstUnlock)
+                    .synchronizable(synchronizable)
+                result.append(("service=\(service),group=default,sync=\(synchronizable)", keychain))
+            }
+
+            for accessGroup in Self.keychainAccessGroups().sorted() {
+                for synchronizable in [false, true] {
+                    let keychain = KeychainAccess.Keychain(service: service, accessGroup: accessGroup)
+                        .accessibility(.afterFirstUnlock)
+                        .synchronizable(synchronizable)
+                    result.append(("service=\(service),group=\(accessGroup),sync=\(synchronizable)", keychain))
+                }
+            }
+        }
+
+        return result
+    }
+
+    public func anisetteStateSummary() -> String {
+        let identifier = self.identifier
+        let decodedLength = identifier.flatMap { Data(base64Encoded: $0)?.count }
+        let isUUID = identifier.flatMap(UUID.init(uuidString:)) != nil
+        return "service=\(Bundle.Info.appbundleIdentifier),bundleID=\(Bundle.main.bundleIdentifier ?? \"nil\"),accessGroups=\(Self.keychainAccessGroups()),identifierPresent=\(identifier != nil),identifierLength=\(identifier?.count ?? 0),identifierIsUUID=\(isUUID),identifierBase64Bytes=\(decodedLength.map { String($0) } ?? \"nil\"),adiPresent=\(self.adiPb != nil),adiLength=\(self.adiPb?.count ?? 0)"
+    }
+
+    @discardableResult
+    public func forceReplaceLegacyAnisetteState() -> Bool {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            debugLog("[KeychainRecovery] Failed to generate replacement identifier")
+            return false
+        }
+
+        let replacement = Data(bytes).base64EncodedString()
+        var verifiedStores = 0
+        let stores = self.anisetteRecoveryKeychains()
+
+        for entry in stores {
+            do {
+                try? entry.keychain.remove("identifier")
+                try? entry.keychain.remove("adiPb")
+                try entry.keychain.set(replacement, key: "identifier")
+                try? entry.keychain.remove("adiPb")
+
+                let identifierMatches = try entry.keychain.getString("identifier") == replacement
+                let adiWasRemoved = try entry.keychain.getString("adiPb") == nil
+                debugLog("[KeychainRecovery] \(entry.label),identifierVerified=\(identifierMatches),adiRemoved=\(adiWasRemoved)")
+                if identifierMatches && adiWasRemoved {
+                    verifiedStores += 1
+                }
+            } catch {
+                debugLog("[KeychainRecovery] \(entry.label),writeError=\(error)")
+            }
+        }
+
+        self.identifier = replacement
+        self.adiPb = nil
+        let activeIdentifier = self.identifier
+        let activeValid = activeIdentifier == replacement && Data(base64Encoded: activeIdentifier ?? "")?.count == 16 && self.adiPb == nil
+        debugLog("[KeychainRecovery] completed,verifiedStores=\(verifiedStores)/\(stores.count),activeStoreValid=\(activeValid),state=\(self.anisetteStateSummary())")
+        return verifiedStores > 0 && activeValid
     }
 
     private func migrateItemsToSharedKeychain() {

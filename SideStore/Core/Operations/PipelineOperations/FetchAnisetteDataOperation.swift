@@ -160,22 +160,35 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
 
         // set as preferred
         UserDefaults.standard.menuAnisetteURL = urlString
-        let url = URL(string: urlString)
+        guard let url = URL(string: urlString) else {
+            throw OperationError.anisetteV3Error(message: "Invalid Anisette server URL")
+        }
         self.url = url
         self.setProgress(60)
-        self.verboseLog("[FetchAnisetteDataOperation] Anisette URL: \(self.url!.absoluteString)")
+        self.debugLog("[FetchAnisetteDataOperation] Runtime state: process=\(ProcessInfo.processInfo.processName),hasLCHome=\(ProcessInfo.processInfo.environment[\"LC_HOME_PATH\"] != nil),hasLPHome=\(ProcessInfo.processInfo.environment[\"LP_HOME_PATH\"] != nil),anisetteURLHost=\(url.host ?? \"nil\"),keychain=\(Keychain.shared.anisetteStateSummary())")
 
         if let identifier = AnisetteDataManager.shared.anisetteIdentifier,
            let adiPb = AnisetteDataManager.shared.anisetteAdiBlob {
             guard let decodedIdentifier = Data(base64Encoded: identifier),
                   decodedIdentifier.count == 16
             else {
-                AnisetteDataManager.shared.anisetteIdentifier = nil
-                AnisetteDataManager.shared.anisetteAdiBlob = nil
+                self.debugLog("[FetchAnisetteDataOperation] Invalid identifier detected; forcing multi-store legacy Anisette replacement")
+                guard Keychain.shared.forceReplaceLegacyAnisetteState() else {
+                    throw OperationError.anisetteV3Error(message: "Failed to replace invalid Anisette state")
+                }
                 return try await self.provision()
             }
+            self.debugLog("[FetchAnisetteDataOperation] Reusing valid legacy identifier and existing adi.pb")
             return try await self.fetchAnisetteV3(identifier, adiPb)
         } else {
+            if AnisetteDataManager.shared.anisetteIdentifier != nil || AnisetteDataManager.shared.anisetteAdiBlob != nil {
+                self.debugLog("[FetchAnisetteDataOperation] Incomplete Anisette state detected; forcing multi-store replacement")
+                guard Keychain.shared.forceReplaceLegacyAnisetteState() else {
+                    throw OperationError.anisetteV3Error(message: "Failed to replace incomplete Anisette state")
+                }
+            } else {
+                self.debugLog("[FetchAnisetteDataOperation] No Anisette state found; starting normal legacy provisioning")
+            }
             return try await self.provision()
         }
     }
