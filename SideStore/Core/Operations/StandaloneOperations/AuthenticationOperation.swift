@@ -111,6 +111,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
     // Main Pipeline Execution
     override func execute(parentProgress: Progress?) async throws -> AuthenticationResult {
         debugLog("[AuthenticationOperation] execute() started")
+        debugLog("[AuthenticationOperation] execute state: process=\(ProcessInfo.processInfo.processName),hasLCHome=\(ProcessInfo.processInfo.environment["LC_HOME_PATH"] != nil),hasLPHome=\(ProcessInfo.processInfo.environment["LP_HOME_PATH"] != nil),keychain=\(Keychain.shared.authenticationStateSummary())")
         defer { debugLog("[AuthenticationOperation] execute() completed") }
         try await super.executePreconditionCheck(parentProgress: parentProgress)
 
@@ -129,6 +130,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
                    let team = AuthManager.shared.team,
                    (self.skipCertificateProvisioning || CertificateManager.shared.activeCertificate != nil)
                 {
+                    self.debugLog("[Authentication] Cached session branch: sessionHasDSID=\(!session.dsid.isEmpty),sessionHasAuthToken=\(!session.authToken.isEmpty),keychain=\(Keychain.shared.authenticationStateSummary())")
                     session.anisetteData = try await self.anisetteDataProvider.getAnisetteData(for: session)
                     let certToUse = CertificateManager.shared.activeCertificate?.certificate
                     
@@ -286,6 +288,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
             self.debugLog("[AuthenticationOperation] Multi-store credential recovery completed recovered=\(recovered)")
             self.debugLog("[AuthenticationOperation] Credential inventory after recovery: \(Keychain.shared.authenticationCredentialInventorySummary())")
         }
+        self.debugLog("[Authentication] startAuthentication received session: hasDSID=\(!session.dsid.isEmpty),hasAuthToken=\(!session.authToken.isEmpty)")
         let adsid = AuthManager.shared.adsid
         let xcodeToken = AuthManager.shared.xcodeToken
         let appleID = AuthManager.shared.currentAppleID
@@ -377,11 +380,14 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
                 }
             }
         }
+
+        self.debugLog("[Authentication] Password authentication returned session: hasDSID=\(!session.dsid.isEmpty),hasAuthToken=\(!session.authToken.isEmpty)")
         
         AuthManager.shared.adsid = session.dsid
         AuthManager.shared.xcodeToken = session.authToken
         AuthManager.shared.currentAppleID = appleID
         AuthManager.shared.password = password
+        self.debugLog("[Authentication] Credential write completed: \(Keychain.shared.authenticationStateSummary()),inventory=\(Keychain.shared.authenticationCredentialInventorySummary())")
         
         return (account, session)
     }
