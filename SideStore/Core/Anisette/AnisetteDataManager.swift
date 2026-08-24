@@ -14,12 +14,12 @@ public final class AnisetteDataManager: @unchecked Sendable {
     private init() {}
     
     public var anisetteIdentifier: String? {
-        get { Keychain.shared.identifier }
+        get { LiveProcessEphemeralAuthentication.current()?.anisetteIdentifier ?? Keychain.shared.identifier }
         set { Keychain.shared.identifier = newValue }
     }
     
     public var anisetteAdiBlob: String? {
-        get { Keychain.shared.adiPb }
+        get { LiveProcessEphemeralAuthentication.current()?.anisetteAdiPb ?? Keychain.shared.adiPb }
         set { Keychain.shared.adiPb = newValue }
     }
 }

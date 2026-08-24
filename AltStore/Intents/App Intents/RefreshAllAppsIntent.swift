@@ -258,21 +258,32 @@ fileprivate func performSideStoreBackgroundRefresh(progress: Progress, presentsN
 
 enum LiveProcessEphemeralAuthentication
 {
-    private nonisolated(unsafe) static var credentials: (adsid: String, xcodeToken: String)?
+    struct Snapshot {
+        let adsid: String
+        let xcodeToken: String
+        let anisetteIdentifier: String
+        let anisetteAdiPb: String
+    }
+
+    private nonisolated(unsafe) static var credentials: Snapshot?
     private static let lock = NSLock()
 
-    static func current() -> (adsid: String, xcodeToken: String)?
+    static func current() -> Snapshot?
     {
         lock.lock()
         defer { lock.unlock() }
         return credentials
     }
 
-    static func set(adsid: String?, xcodeToken: String?)
+    static func set(adsid: String?, xcodeToken: String?, anisetteIdentifier: String?, anisetteAdiPb: String?)
     {
         lock.lock()
-        if let adsid, let xcodeToken, !adsid.isEmpty, !xcodeToken.isEmpty {
-            credentials = (adsid, xcodeToken)
+        if let adsid, let xcodeToken, let anisetteIdentifier, let anisetteAdiPb,
+           !adsid.isEmpty, !xcodeToken.isEmpty, !anisetteIdentifier.isEmpty, !anisetteAdiPb.isEmpty {
+            credentials = Snapshot(adsid: adsid,
+                                   xcodeToken: xcodeToken,
+                                   anisetteIdentifier: anisetteIdentifier,
+                                   anisetteAdiPb: anisetteAdiPb)
         } else {
             credentials = nil
         }
@@ -291,11 +302,17 @@ enum LiveProcessEphemeralAuthentication
 @objc(SideStoreLiveProcessRefreshBridge)
 final class SideStoreLiveProcessRefreshBridge: NSObject
 {
-    @objc(setEphemeralAuthenticationWithAdsid:xcodeToken:)
-    class func setEphemeralAuthentication(adsid: String?, xcodeToken: String?)
+    @objc(setEphemeralAuthenticationWithAdsid:xcodeToken:anisetteIdentifier:anisetteAdiPb:)
+    class func setEphemeralAuthentication(adsid: String?,
+                                          xcodeToken: String?,
+                                          anisetteIdentifier: String?,
+                                          anisetteAdiPb: String?)
     {
-        LiveProcessEphemeralAuthentication.set(adsid: adsid, xcodeToken: xcodeToken)
-        debugLog("[LCRefresh] Ephemeral authentication received: hasADSID=\(adsid != nil),hasXcodeToken=\(xcodeToken != nil)")
+        LiveProcessEphemeralAuthentication.set(adsid: adsid,
+                                               xcodeToken: xcodeToken,
+                                               anisetteIdentifier: anisetteIdentifier,
+                                               anisetteAdiPb: anisetteAdiPb)
+        debugLog("[LCRefresh] Ephemeral authentication received: hasADSID=\(adsid != nil),hasXcodeToken=\(xcodeToken != nil),hasIdentifier=\(anisetteIdentifier != nil),hasAdiPb=\(anisetteAdiPb != nil)")
     }
 
     @objc(refreshAllAppsWithProgress:completion:)
