@@ -277,6 +277,13 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
     }
     
     private func silentSignIn() async throws -> (ALTAccount, ALTAppleAPISession)? {
+        let hadUsableCredentials = (AuthManager.shared.adsid != nil && AuthManager.shared.xcodeToken != nil) ||
+            (AuthManager.shared.currentAppleID != nil && AuthManager.shared.password != nil)
+        if !hadUsableCredentials {
+            self.debugLog("[AuthenticationOperation] Active Keychain has no usable credential pair; starting multi-store recovery")
+            let recovered = Keychain.shared.recoverAuthenticationCredentials()
+            self.debugLog("[AuthenticationOperation] Multi-store credential recovery completed recovered=\(recovered)")
+        }
         let adsid = AuthManager.shared.adsid
         let xcodeToken = AuthManager.shared.xcodeToken
         let appleID = AuthManager.shared.currentAppleID
