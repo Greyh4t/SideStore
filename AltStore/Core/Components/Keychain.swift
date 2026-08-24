@@ -64,6 +64,9 @@ public class Keychain
         "signingCertificate", "signingCertificatePassword", "signingCertificatePrivateKey",
         "signingCertificateSerialNumber", "identifier", "adiPb"
     ]
+    private static let authenticationKeys = Set([
+        "appleIDEmailAddress", "appleIDPassword", "appleIDAdsid", "appleIDXcodeToken"
+    ])
     
     @KeychainItem(key: "appleIDEmailAddress")
     public var appleIDEmailAddress: String?
@@ -221,6 +224,10 @@ public class Keychain
             return "key=\(account),service=\(service),group=\(accessGroup),sync=\(synchronizableDescription),accessible=\(accessible)"
         }.sorted()
         return "status=\(status),matchingItems=\(summaries.count),items=[\(summaries.joined(separator: ";"))]"
+    }
+
+    public func authenticationStateSummary() -> String {
+        return "service=\(Bundle.Info.appbundleIdentifier),hasEmail=\(self.appleIDEmailAddress != nil),hasPassword=\(self.appleIDPassword != nil),hasADSID=\(self.appleIDAdsid != nil),hasXcodeToken=\(self.appleIDXcodeToken != nil)"
     }
 
     @discardableResult
@@ -386,6 +393,10 @@ public class Keychain
         }
         if value == nil {
             self.sideStoreLegacyKeychain[key] = nil
+        }
+        if Self.authenticationKeys.contains(key) {
+            let readbackPresent = (try? self.keychain.getString(key)) != nil
+            debugLog("[KeychainAuthWrite] process=\(ProcessInfo.processInfo.processName),hasLPHome=\(ProcessInfo.processInfo.environment["LP_HOME_PATH"] != nil),service=\(Bundle.Info.appbundleIdentifier),key=\(key),operation=\(value == nil ? "delete" : "set"),readbackPresent=\(readbackPresent)")
         }
     }
     
