@@ -280,9 +280,11 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
         let hadUsableCredentials = (AuthManager.shared.adsid != nil && AuthManager.shared.xcodeToken != nil) ||
             (AuthManager.shared.currentAppleID != nil && AuthManager.shared.password != nil)
         if !hadUsableCredentials {
+            self.debugLog("[AuthenticationOperation] Credential inventory before recovery: \(Keychain.shared.authenticationCredentialInventorySummary())")
             self.debugLog("[AuthenticationOperation] Active Keychain has no usable credential pair; starting multi-store recovery")
             let recovered = Keychain.shared.recoverAuthenticationCredentials()
             self.debugLog("[AuthenticationOperation] Multi-store credential recovery completed recovered=\(recovered)")
+            self.debugLog("[AuthenticationOperation] Credential inventory after recovery: \(Keychain.shared.authenticationCredentialInventorySummary())")
         }
         let adsid = AuthManager.shared.adsid
         let xcodeToken = AuthManager.shared.xcodeToken
