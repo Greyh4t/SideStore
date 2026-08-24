@@ -131,7 +131,20 @@ public class Keychain
     }
 
     private static func liveContainerSharedAccessGroup() -> String? {
-        return self.keychainAccessGroups().first { $0.hasSuffix(".com.kdt.livecontainer.shared") }
+        let accessGroups = self.keychainAccessGroups()
+        if let sharedAccessGroup = accessGroups.first(where: { $0.hasSuffix(".com.kdt.livecontainer.shared") }) {
+            return sharedAccessGroup
+        }
+
+        // LiveProcess is signed with TEAM_ID.* while the embedded SideStore
+        // process receives the expanded TEAM_ID.com.kdt.livecontainer.shared
+        // entitlement. Both entitlements authorize the same explicit shared
+        // group, so normalize the wildcard before constructing the keychain.
+        if let wildcardAccessGroup = accessGroups.first(where: { $0.hasSuffix(".*") }) {
+            return String(wildcardAccessGroup.dropLast(1)) + "com.kdt.livecontainer.shared"
+        }
+
+        return nil
     }
 
     private static func keychainAccessGroups() -> [String] {
