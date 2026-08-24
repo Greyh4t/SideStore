@@ -30,16 +30,16 @@ public struct KeychainItem<Value>
         get {
             switch Value.self
             {
-            case is Data.Type: return Keychain.shared.data(forKey: self.key) as? Value
-            case is String.Type: return Keychain.shared.string(forKey: self.key) as? Value
+            case is Data.Type: return try? Keychain.shared.keychain.getData(self.key) as? Value
+            case is String.Type: return try? Keychain.shared.keychain.getString(self.key) as? Value
             default: return nil
             }
         }
         set {
             switch Value.self
             {
-            case is Data.Type: Keychain.shared.setData(newValue as? Data, forKey: self.key)
-            case is String.Type: Keychain.shared.setString(newValue as? String, forKey: self.key)
+            case is Data.Type: Keychain.shared.keychain[data: self.key] = newValue as? Data
+            case is String.Type: Keychain.shared.keychain[self.key] = newValue as? String
             default: break
             }
         }
@@ -54,392 +54,73 @@ public struct KeychainItem<Value>
 public class Keychain
 {
     public static let shared = Keychain()
-
-    private let sideStoreLegacyKeychain: KeychainAccess.Keychain
-    private let legacyKeychain: KeychainAccess.Keychain
     fileprivate let keychain: KeychainAccess.Keychain
+    
+    @KeychainItem(key: "appleIDEmailAddress") public var appleIDEmailAddress: String?
+    @KeychainItem(key: "appleIDPassword") public var appleIDPassword: String?
+    @KeychainItem(key: "appleIDAdsid") public var appleIDAdsid: String?
+    @KeychainItem(key: "appleIDXcodeToken") public var appleIDXcodeToken: String?
+    @KeychainItem(key: "signingCertificate") public var signingCertificate: Data?
+    @KeychainItem(key: "signingCertificatePassword") public var signingCertificatePassword: String?
 
-    private static let migratableKeys = [
-        "appleIDEmailAddress", "appleIDPassword", "appleIDAdsid", "appleIDXcodeToken",
-        "signingCertificate", "signingCertificatePassword", "signingCertificatePrivateKey",
-        "signingCertificateSerialNumber", "identifier", "adiPb"
-    ]
-    private static let authenticationKeys = Set([
-        "appleIDEmailAddress", "appleIDPassword", "appleIDAdsid", "appleIDXcodeToken"
-    ])
-    
-    @KeychainItem(key: "appleIDEmailAddress")
-    public var appleIDEmailAddress: String?
-    
-    @KeychainItem(key: "appleIDPassword")
-    public var appleIDPassword: String?
-    
-    @KeychainItem(key: "appleIDAdsid")
-    public var appleIDAdsid: String?
-    
-    @KeychainItem(key: "appleIDXcodeToken")
-    public var appleIDXcodeToken: String?
-    
-    @KeychainItem(key: "signingCertificate")
-    public var signingCertificate: Data?
-    
-    @KeychainItem(key: "signingCertificatePassword")
-    public var signingCertificatePassword: String?
-    
-    // TODO: mahee96: remove legacy keys in later versions after 0.6.4 coz by now our migrations should be effectively moved all
-    // Legacy
-    @KeychainItem(key: "signingCertificatePrivateKey")
-    public var signingCertificatePrivateKey: Data?
-    
-    // TODO: mahee96: remove legacy keys in later versions after 0.6.4 coz by now our migrations should be effectively moved all
-    // Legacy
-    @KeychainItem(key: "signingCertificateSerialNumber")
-    public var signingCertificateSerialNumber: String?
-    
-    @KeychainItem(key: "identifier")
-    public var identifier: String?
-    
-    @KeychainItem(key: "adiPb")
-    public var adiPb: String?
-
-    // MARK: - Dynamic Imported Certificates Storage
+    // Legacy certificate fields retained by official SideStore's PKCS#12 migration.
+    @KeychainItem(key: "signingCertificatePrivateKey") public var signingCertificatePrivateKey: Data?
+    @KeychainItem(key: "signingCertificateSerialNumber") public var signingCertificateSerialNumber: String?
+    @KeychainItem(key: "identifier") public var identifier: String?
+    @KeychainItem(key: "adiPb") public var adiPb: String?
 
     public subscript(certificateSerial serial: String) -> Data? {
-        get { self.data(forKey: "importedCert_" + serial) }
-        set { self.setData(newValue, forKey: "importedCert_" + serial) }
+        get { try? self.keychain.getData("importedCert_" + serial) }
+        set {
+            if let data = newValue {
+                try? self.keychain.set(data, key: "importedCert_" + serial)
+            } else {
+                try? self.keychain.remove("importedCert_" + serial)
+            }
+        }
     }
     
-    private init() {
+    private init()
+    {
         let service = Bundle.Info.appbundleIdentifier
-        self.sideStoreLegacyKeychain = KeychainAccess.Keychain(service: "com.SideStore.SideStore")
-            .accessibility(.afterFirstUnlock)
-            .synchronizable(true)
-        self.legacyKeychain = KeychainAccess.Keychain(service: service)
-            .accessibility(.afterFirstUnlock)
-            .synchronizable(true)
-
         if let accessGroup = Self.liveContainerSharedAccessGroup() {
             self.keychain = KeychainAccess.Keychain(service: service, accessGroup: accessGroup)
                 .accessibility(.afterFirstUnlock)
                 .synchronizable(true)
-            self.migrateItemsToSharedKeychain()
         } else {
-            self.keychain = self.legacyKeychain
+            self.keychain = KeychainAccess.Keychain(service: service)
+                .accessibility(.afterFirstUnlock)
+                .synchronizable(true)
         }
-
         self.migrateLegacyKeychainItems()
     }
 
-    private static func liveContainerSharedAccessGroup() -> String? {
-        let accessGroups = self.keychainAccessGroups()
-        if let sharedAccessGroup = accessGroups.first(where: { $0.hasSuffix(".com.kdt.livecontainer.shared") }) {
-            return sharedAccessGroup
-        }
-
-        // LiveProcess is signed with TEAM_ID.* while the embedded SideStore
-        // process receives the expanded TEAM_ID.com.kdt.livecontainer.shared
-        // entitlement. Both entitlements authorize the same explicit shared
-        // group, so normalize the wildcard before constructing the keychain.
-        if let wildcardAccessGroup = accessGroups.first(where: { $0.hasSuffix(".*") }) {
-            return String(wildcardAccessGroup.dropLast(1)) + "com.kdt.livecontainer.shared"
-        }
-
-        return nil
-    }
-
-    private static func keychainAccessGroups() -> [String] {
+    private static func liveContainerSharedAccessGroup() -> String?
+    {
         let task = SecTaskCreateFromSelf(nil)
         guard let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil)?.takeRetainedValue(),
               let groups = value as? [String]
         else {
-            return []
+            return nil
         }
-        return groups
-    }
-
-    private func recoveryKeychains() -> [(label: String, keychain: KeychainAccess.Keychain)] {
-        let services = Set([
-            Bundle.Info.appbundleIdentifier,
-            Bundle.main.bundleIdentifier ?? "",
-            "com.kdt.livecontainer",
-            "com.kdt.LiveContainer",
-            "com.kdt.LiveContainer2",
-            "com.kdt.LiveContainer3",
-            "com.SideStore.SideStore",
-            "com.rileytestut.AltStore"
-        ].filter { !$0.isEmpty })
-        var result: [(String, KeychainAccess.Keychain)] = []
-
-        for service in services.sorted() {
-            for synchronizable in [false, true] {
-                let keychain = KeychainAccess.Keychain(service: service)
-                    .accessibility(.afterFirstUnlock)
-                    .synchronizable(synchronizable)
-                result.append(("service=\(service),group=default,sync=\(synchronizable)", keychain))
-            }
-
-            for accessGroup in Self.keychainAccessGroups().sorted() {
-                for synchronizable in [false, true] {
-                    let keychain = KeychainAccess.Keychain(service: service, accessGroup: accessGroup)
-                        .accessibility(.afterFirstUnlock)
-                        .synchronizable(synchronizable)
-                    result.append(("service=\(service),group=\(accessGroup),sync=\(synchronizable)", keychain))
-                }
-            }
-        }
-
-        return result
-    }
-
-    public func anisetteStateSummary() -> String {
-        let identifier = self.identifier
-        let decodedLength = identifier.flatMap { Data(base64Encoded: $0)?.count }
-        let isUUID = identifier.flatMap { UUID(uuidString: $0) } != nil
-        let bundleID = Bundle.main.bundleIdentifier ?? "nil"
-        let decodedLengthDescription = decodedLength.map(String.init) ?? "nil"
-        return "service=\(Bundle.Info.appbundleIdentifier),bundleID=\(bundleID),accessGroups=\(Self.keychainAccessGroups()),identifierPresent=\(identifier != nil),identifierLength=\(identifier?.count ?? 0),identifierIsUUID=\(isUUID),identifierBase64Bytes=\(decodedLengthDescription),adiPresent=\(self.adiPb != nil),adiLength=\(self.adiPb?.count ?? 0)"
-    }
-
-    public func authenticationCredentialInventorySummary() -> String {
-        let credentialKeys = Set([
-            "appleIDEmailAddress", "appleIDPassword", "appleIDAdsid", "appleIDXcodeToken"
-        ])
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecMatchLimit: kSecMatchLimitAll,
-            kSecReturnAttributes: true,
-            kSecAttrSynchronizable: kSecAttrSynchronizableAny
-        ]
-        var rawResult: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &rawResult)
-        guard status == errSecSuccess else {
-            return "status=\(status),items=[]"
-        }
-
-        let items: [[String: Any]]
-        if let many = rawResult as? [[String: Any]] {
-            items = many
-        } else if let one = rawResult as? [String: Any] {
-            items = [one]
-        } else {
-            return "status=\(status),unexpectedResultType=true"
-        }
-
-        let summaries = items.compactMap { item -> String? in
-            guard let account = item[kSecAttrAccount as String] as? String,
-                  credentialKeys.contains(account)
-            else { return nil }
-            let service = item[kSecAttrService as String] as? String ?? "nil"
-            let accessGroup = item[kSecAttrAccessGroup as String] as? String ?? "nil"
-            let synchronizable = (item[kSecAttrSynchronizable as String] as? NSNumber)?.boolValue
-            let accessible = item[kSecAttrAccessible as String].map { String(describing: $0) } ?? "nil"
-            let synchronizableDescription = synchronizable.map { String($0) } ?? "nil"
-            return "key=\(account),service=\(service),group=\(accessGroup),sync=\(synchronizableDescription),accessible=\(accessible)"
-        }.sorted()
-        return "status=\(status),matchingItems=\(summaries.count),items=[\(summaries.joined(separator: ";"))]"
-    }
-
-    public func authenticationStateSummary() -> String {
-        return "service=\(Bundle.Info.appbundleIdentifier),hasEmail=\(self.appleIDEmailAddress != nil),hasPassword=\(self.appleIDPassword != nil),hasADSID=\(self.appleIDAdsid != nil),hasXcodeToken=\(self.appleIDXcodeToken != nil)"
-    }
-
-    @discardableResult
-    public func forceReplaceLegacyAnisetteState() -> Bool {
-        var bytes = [UInt8](repeating: 0, count: 16)
-        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            debugLog("[KeychainRecovery] Failed to generate replacement identifier")
-            return false
-        }
-
-        let replacement = Data(bytes).base64EncodedString()
-        var verifiedStores = 0
-        let stores = self.recoveryKeychains()
-
-        for entry in stores {
-            do {
-                try? entry.keychain.remove("identifier")
-                try? entry.keychain.remove("adiPb")
-                try entry.keychain.set(replacement, key: "identifier")
-                try? entry.keychain.remove("adiPb")
-
-                let identifierMatches = try entry.keychain.getString("identifier") == replacement
-                let adiWasRemoved = try entry.keychain.getString("adiPb") == nil
-                debugLog("[KeychainRecovery] \(entry.label),identifierVerified=\(identifierMatches),adiRemoved=\(adiWasRemoved)")
-                if identifierMatches && adiWasRemoved {
-                    verifiedStores += 1
-                }
-            } catch {
-                debugLog("[KeychainRecovery] \(entry.label),writeError=\(error)")
-            }
-        }
-
-        self.identifier = replacement
-        self.adiPb = nil
-        let activeIdentifier = self.identifier
-        let activeValid = activeIdentifier == replacement && Data(base64Encoded: activeIdentifier ?? "")?.count == 16 && self.adiPb == nil
-        debugLog("[KeychainRecovery] completed,verifiedStores=\(verifiedStores)/\(stores.count),activeStoreValid=\(activeValid),state=\(self.anisetteStateSummary())")
-        return verifiedStores > 0 && activeValid
-    }
-
-    @discardableResult
-    public func recoverAuthenticationCredentials() -> Bool {
-        typealias Credentials = (email: String?, password: String?, adsid: String?, token: String?)
-        var passwordCredentials: Credentials?
-        var tokenCredentials: Credentials?
-        let stores = self.recoveryKeychains()
-
-        for entry in stores {
-            let credentials: Credentials = (
-                try? entry.keychain.getString("appleIDEmailAddress"),
-                try? entry.keychain.getString("appleIDPassword"),
-                try? entry.keychain.getString("appleIDAdsid"),
-                try? entry.keychain.getString("appleIDXcodeToken")
-            )
-            let hasPasswordPair = credentials.email != nil && credentials.password != nil
-            let hasTokenPair = credentials.adsid != nil && credentials.token != nil
-            debugLog("[CredentialRecovery] \(entry.label),hasEmail=\(credentials.email != nil),hasPassword=\(credentials.password != nil),hasADSID=\(credentials.adsid != nil),hasXcodeToken=\(credentials.token != nil),passwordPair=\(hasPasswordPair),tokenPair=\(hasTokenPair)")
-            if passwordCredentials == nil && hasPasswordPair {
-                passwordCredentials = credentials
-            }
-            if tokenCredentials == nil && hasTokenPair {
-                tokenCredentials = credentials
-            }
-        }
-
-        guard passwordCredentials != nil || tokenCredentials != nil else {
-            debugLog("[CredentialRecovery] No complete credential pair found in \(stores.count) candidate stores")
-            return false
-        }
-
-        let selected: Credentials = (
-            passwordCredentials?.email,
-            passwordCredentials?.password,
-            tokenCredentials?.adsid,
-            tokenCredentials?.token
-        )
-        // Compatibility stores above are read-only sources. Always write through
-        // SideStore's current Keychain properties so future official builds read
-        // the same canonical service, keys, access group, and accessibility.
-        if let email = selected.email { self.appleIDEmailAddress = email }
-        if let password = selected.password { self.appleIDPassword = password }
-        if let adsid = selected.adsid { self.appleIDAdsid = adsid }
-        if let token = selected.token { self.appleIDXcodeToken = token }
-
-        let activePasswordPair = self.appleIDEmailAddress != nil && self.appleIDPassword != nil
-        let activeTokenPair = self.appleIDAdsid != nil && self.appleIDXcodeToken != nil
-        debugLog("[CredentialRecovery] canonical write completed,service=\(Bundle.Info.appbundleIdentifier),activePasswordPair=\(activePasswordPair),activeTokenPair=\(activeTokenPair)")
-
-        if activePasswordPair || activeTokenPair {
-            let legacyValues: [(key: String, value: String?)] = [
-                ("appleIDEmailAddress", selected.email),
-                ("appleIDPassword", selected.password),
-                ("appleIDAdsid", selected.adsid),
-                ("appleIDXcodeToken", selected.token)
-            ]
-            for entry in stores where entry.label.hasPrefix("service=com.rileytestut.AltStore,") {
-                do {
-                    var removedKeys = 0
-                    for legacyValue in legacyValues {
-                        guard let expectedValue = legacyValue.value,
-                              try entry.keychain.getString(legacyValue.key) == expectedValue
-                        else { continue }
-                        try entry.keychain.remove(legacyValue.key)
-                        if try entry.keychain.getString(legacyValue.key) == nil {
-                            removedKeys += 1
-                        }
-                    }
-                    debugLog("[CredentialRecovery] legacy AltStore cleanup \(entry.label),removedMatchingAuthenticationKeys=\(removedKeys)")
-                } catch {
-                    debugLog("[CredentialRecovery] legacy AltStore cleanup \(entry.label),error=\(error)")
-                }
-            }
-        }
-        return activePasswordPair || activeTokenPair
-    }
-
-    private func migrateItemsToSharedKeychain() {
-        for key in Self.migratableKeys {
-            guard (try? self.keychain.getData(key)) == nil,
-                  (try? self.keychain.getString(key)) == nil
-            else { continue }
-
-            if let data = (try? self.legacyKeychain.getData(key)) ?? (try? self.sideStoreLegacyKeychain.getData(key)) {
-                try? self.keychain.set(data, key: key)
-            } else if let string = (try? self.legacyKeychain.getString(key)) ?? (try? self.sideStoreLegacyKeychain.getString(key)) {
-                try? self.keychain.set(string, key: key)
-            }
-        }
-    }
-
-    fileprivate func data(forKey key: String) -> Data? {
-        if let value = try? self.keychain.getData(key) {
-            return value
-        }
-        guard let value = (try? self.legacyKeychain.getData(key)) ?? (try? self.sideStoreLegacyKeychain.getData(key)) else { return nil }
-        try? self.keychain.set(value, key: key)
-        return value
-    }
-
-    fileprivate func string(forKey key: String) -> String? {
-        if let value = try? self.keychain.getString(key) {
-            return value
-        }
-        guard let value = (try? self.legacyKeychain.getString(key)) ?? (try? self.sideStoreLegacyKeychain.getString(key)) else { return nil }
-        try? self.keychain.set(value, key: key)
-        return value
-    }
-
-    fileprivate func setData(_ value: Data?, forKey key: String) {
-        self.keychain[data: key] = value
-        if value == nil && self.keychain !== self.legacyKeychain {
-            self.legacyKeychain[data: key] = nil
-        }
-        if value == nil {
-            self.sideStoreLegacyKeychain[data: key] = nil
-        }
-    }
-
-    fileprivate func setString(_ value: String?, forKey key: String) {
-        self.keychain[key] = value
-        if value == nil && self.keychain !== self.legacyKeychain {
-            self.legacyKeychain[key] = nil
-        }
-        if value == nil {
-            self.sideStoreLegacyKeychain[key] = nil
-        }
-        if Self.authenticationKeys.contains(key) {
-            let readbackPresent = (try? self.keychain.getString(key)) != nil
-            debugLog("[KeychainAuthWrite] process=\(ProcessInfo.processInfo.processName),hasLPHome=\(ProcessInfo.processInfo.environment["LP_HOME_PATH"] != nil),service=\(Bundle.Info.appbundleIdentifier),key=\(key),operation=\(value == nil ? "delete" : "set"),readbackPresent=\(readbackPresent)")
-        }
+        return groups.first { $0.hasSuffix(".com.kdt.livecontainer.shared") }
     }
     
     private func migrateLegacyKeychainItems()
     {
-        let signingCertificateKey   = "signingCertificate"
-        let privateKeyKey           = "signingCertificatePrivateKey"
-        let serialNumberKey         = "signingCertificateSerialNumber"
-        
-        // 1. Check if signingCertificate contains data and is NOT a PKCS#12 archive
+        let signingCertificateKey = "signingCertificate"
+        let privateKeyKey = "signingCertificatePrivateKey"
+        let serialNumberKey = "signingCertificateSerialNumber"
         guard let certData = try? self.keychain.getData(signingCertificateKey), !certData.isPKCS12 else { return }
-        
-        // 2. Check if we have the private key
         guard let privateKey = try? self.keychain.getData(privateKeyKey) else { return }
-        
-        // 3. Load the raw certificate and pair with private key
         guard let x509 = ALTX509Certificate(data: certData) else { return }
         let cert = ALTCertificate(x509: x509, privateKey: privateKey)
-        
-        // 4. Create PKCS12 data structure
         do {
             let p12Data = try cert.unencryptedP12Data()
-            // 5. Store the new PKCS12 format in signingCertificate slot
             try self.keychain.set(p12Data, key: signingCertificateKey)
             try self.keychain.set("", key: "signingCertificatePassword")
-            
-            // 6. Clear legacy keys
             try self.keychain.remove(privateKeyKey)
             try self.keychain.remove(serialNumberKey)
-            
             debugLog("[Keychain] Successfully migrated legacy certificate and private key to PKCS12 format and cleared legacy keys.")
         } catch {
             debugLog("[Keychain] Failed to migrate legacy certificate to PKCS12 format: \(error)")
@@ -449,32 +130,26 @@ public class Keychain
     public func reset(keepCertificate: Bool = false, keepAnisetteData: Bool = true)
     {
         debugLog("[Keychain] Resetting Keychain items (keepCertificate: \(keepCertificate), keepAnisetteData: \(keepAnisetteData))...")
-        
         self.appleIDEmailAddress = nil
         self.appleIDPassword = nil
         self.appleIDAdsid = nil
         self.appleIDXcodeToken = nil
         debugLog("[Keychain] Cleared Apple ID credentials & tokens (email, password, adsid, xcodeToken).")
-        
         if !keepCertificate {
-            // Legacy
             self.signingCertificatePrivateKey = nil
             self.signingCertificateSerialNumber = nil
-
             self.signingCertificate = nil
             self.signingCertificatePassword = nil
             debugLog("[Keychain] Cleared signing certificate & private key.")
         } else {
             debugLog("[Keychain] Preserved signing certificate.")
         }
-        
         if !keepAnisetteData {
             self.adiPb = nil
             debugLog("[Keychain] Cleared Anisette ADI data (adiPb).")
         } else {
             debugLog("[Keychain] Preserved Anisette ADI data (adiPb).")
         }
-        
         debugLog("[Keychain] Cleared in-memory session, certificate, and team instances.")
     }
 
@@ -482,10 +157,6 @@ public class Keychain
     {
         debugLog("[Keychain] Clearing all Keychain items related to this instance...")
         try? self.keychain.removeAll()
-        if self.keychain !== self.legacyKeychain {
-            try? self.legacyKeychain.removeAll()
-        }
-        try? self.sideStoreLegacyKeychain.removeAll()
         debugLog("[Keychain] All Keychain items and in-memory session/team cleared.")
     }
 }

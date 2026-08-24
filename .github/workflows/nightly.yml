@@ -5,7 +5,7 @@ permissions:
 
 on:
   push:
-    branches: [develop, LiveContainerSupport, legacy-clean-sidestore-background-refresh, legacy-standard-sidestore, diagnostic-anisette-recovery]
+    branches: [develop, LiveContainerSupport, clean-background-refresh]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
@@ -259,7 +259,7 @@ jobs:
       # upload release to GH
       # --------------------------------------------------
       - name: Upload Release
-        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name != 'legacy-clean-sidestore-background-refresh' && github.ref_name != 'legacy-standard-sidestore' && github.ref_name != 'diagnostic-anisette-recovery'
+        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name != 'clean-background-refresh'
         run: |
           python3 scripts/ci/workflow.py upload-release \
             "$RELEASE_NAME" \
@@ -268,29 +268,11 @@ jobs:
             "$GITHUB_REPOSITORY" \
             "$UPSTREAM_CHANNEL"
 
-      - name: Upload LiveContainer legacy clean build
-        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name == 'legacy-clean-sidestore-background-refresh'
+      - name: Upload clean LiveContainer background refresh build
+        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name == 'clean-background-refresh'
         env:
-          FIX_TAG: livecontainer-background-refresh-legacy-clean
+          FIX_TAG: livecontainer-background-refresh-clean
         run: |
           gh release view "$FIX_TAG" >/dev/null 2>&1 || \
-            gh release create "$FIX_TAG" --title "LiveContainer background refresh (legacy clean)" --prerelease
-          gh release upload "$FIX_TAG" SideStore.ipa --clobber
-
-      - name: Upload legacy standard build
-        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name == 'legacy-standard-sidestore'
-        env:
-          FIX_TAG: livecontainer-background-refresh-legacy-standard
-        run: |
-          gh release view "$FIX_TAG" >/dev/null 2>&1 || \
-            gh release create "$FIX_TAG" --title "LiveContainer background refresh (legacy standard)" --prerelease
-          gh release upload "$FIX_TAG" SideStore.ipa --clobber
-
-      - name: Upload diagnostic Anisette recovery build
-        if: steps.build_gate.outputs.should_skip != 'true' && github.ref_name == 'diagnostic-anisette-recovery'
-        env:
-          FIX_TAG: livecontainer-diagnostic-anisette-recovery
-        run: |
-          gh release view "$FIX_TAG" >/dev/null 2>&1 || \
-            gh release create "$FIX_TAG" --title "LiveContainer diagnostic Anisette recovery" --prerelease
+            gh release create "$FIX_TAG" --title "LiveContainer background refresh (clean)" --prerelease
           gh release upload "$FIX_TAG" SideStore.ipa --clobber
