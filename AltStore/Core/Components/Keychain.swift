@@ -183,6 +183,45 @@ public class Keychain
         return "service=\(Bundle.Info.appbundleIdentifier),bundleID=\(bundleID),accessGroups=\(Self.keychainAccessGroups()),identifierPresent=\(identifier != nil),identifierLength=\(identifier?.count ?? 0),identifierIsUUID=\(isUUID),identifierBase64Bytes=\(decodedLengthDescription),adiPresent=\(self.adiPb != nil),adiLength=\(self.adiPb?.count ?? 0)"
     }
 
+    public func authenticationCredentialInventorySummary() -> String {
+        let credentialKeys = Set([
+            "appleIDEmailAddress", "appleIDPassword", "appleIDAdsid", "appleIDXcodeToken"
+        ])
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecMatchLimit: kSecMatchLimitAll,
+            kSecReturnAttributes: true,
+            kSecAttrSynchronizable: kSecAttrSynchronizableAny
+        ]
+        var rawResult: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &rawResult)
+        guard status == errSecSuccess else {
+            return "status=\(status),items=[]"
+        }
+
+        let items: [[String: Any]]
+        if let many = rawResult as? [[String: Any]] {
+            items = many
+        } else if let one = rawResult as? [String: Any] {
+            items = [one]
+        } else {
+            return "status=\(status),unexpectedResultType=true"
+        }
+
+        let summaries = items.compactMap { item -> String? in
+            guard let account = item[kSecAttrAccount as String] as? String,
+                  credentialKeys.contains(account)
+            else { return nil }
+            let service = item[kSecAttrService as String] as? String ?? "nil"
+            let accessGroup = item[kSecAttrAccessGroup as String] as? String ?? "nil"
+            let synchronizable = (item[kSecAttrSynchronizable as String] as? NSNumber)?.boolValue
+            let accessible = item[kSecAttrAccessible as String].map { String(describing: $0) } ?? "nil"
+            let synchronizableDescription = synchronizable.map { String($0) } ?? "nil"
+            return "key=\(account),service=\(service),group=\(accessGroup),sync=\(synchronizableDescription),accessible=\(accessible)"
+        }.sorted()
+        return "status=\(status),matchingItems=\(summaries.count),items=[\(summaries.joined(separator: ";"))]"
+    }
+
     @discardableResult
     public func forceReplaceLegacyAnisetteState() -> Bool {
         var bytes = [UInt8](repeating: 0, count: 16)
