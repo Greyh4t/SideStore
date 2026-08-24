@@ -289,8 +289,9 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
             self.debugLog("[AuthenticationOperation] Multi-store credential recovery completed recovered=\(recovered)")
             self.debugLog("[AuthenticationOperation] Credential inventory after recovery: \(Keychain.shared.authenticationCredentialInventorySummary())")
         }
-        let adsid = AuthManager.shared.adsid
-        let xcodeToken = AuthManager.shared.xcodeToken
+        let ephemeralAuthentication = LiveProcessEphemeralAuthentication.current()
+        let adsid = ephemeralAuthentication?.adsid ?? AuthManager.shared.adsid
+        let xcodeToken = ephemeralAuthentication?.xcodeToken ?? AuthManager.shared.xcodeToken
         let appleID = AuthManager.shared.currentAppleID
         let password = AuthManager.shared.password
         let bundleID = Bundle.main.bundleIdentifier ?? "nil"

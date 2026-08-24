@@ -256,14 +256,53 @@ fileprivate func performSideStoreBackgroundRefresh(progress: Progress, presentsN
     }
 }
 
+enum LiveProcessEphemeralAuthentication
+{
+    private nonisolated(unsafe) static var credentials: (adsid: String, xcodeToken: String)?
+    private static let lock = NSLock()
+
+    static func current() -> (adsid: String, xcodeToken: String)?
+    {
+        lock.lock()
+        defer { lock.unlock() }
+        return credentials
+    }
+
+    static func set(adsid: String?, xcodeToken: String?)
+    {
+        lock.lock()
+        if let adsid, let xcodeToken, !adsid.isEmpty, !xcodeToken.isEmpty {
+            credentials = (adsid, xcodeToken)
+        } else {
+            credentials = nil
+        }
+        lock.unlock()
+    }
+
+    static func clear()
+    {
+        lock.lock()
+        credentials = nil
+        lock.unlock()
+    }
+}
+
 @available(iOS 17.0, *)
 @objc(SideStoreLiveProcessRefreshBridge)
 final class SideStoreLiveProcessRefreshBridge: NSObject
 {
+    @objc(setEphemeralAuthenticationWithAdsid:xcodeToken:)
+    class func setEphemeralAuthentication(adsid: String?, xcodeToken: String?)
+    {
+        LiveProcessEphemeralAuthentication.set(adsid: adsid, xcodeToken: xcodeToken)
+        debugLog("[LCRefresh] Ephemeral authentication received: hasADSID=\(adsid != nil),hasXcodeToken=\(xcodeToken != nil)")
+    }
+
     @objc(refreshAllAppsWithProgress:completion:)
     class func refreshAllApps(progress: Progress, completion: @escaping (NSError?) -> Void)
     {
         Task {
+            defer { LiveProcessEphemeralAuthentication.clear() }
             do
             {
                 try await performSideStoreBackgroundRefresh(progress: progress, presentsNotifications: true)
