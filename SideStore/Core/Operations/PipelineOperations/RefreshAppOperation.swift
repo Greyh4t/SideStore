@@ -27,7 +27,12 @@ final class RefreshAppOperation: BasePipelineOperation<InstallAppOperationContex
             do {
                 try await installProvisioningProfiles(p.value.data)
             } catch {
-                throw MinimuxerWrapperError.profileInstall
+                // Preserve the device/pairing/misagent failure returned by minimuxer.
+                // Replacing every failure with .profileInstall hides whether the
+                // request ever reached misagent and makes connection failures look
+                // like provisioning-profile signing errors.
+                debugLog("[RefreshAppOperation] profile installation failed: \(error.localizedDescription)")
+                throw error
             }
         }
         

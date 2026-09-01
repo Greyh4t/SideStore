@@ -297,10 +297,10 @@ extension MinimuxerError {
             return NSLocalizedString("Unable to uninstall the app", comment: "")
         case .createMisagent:
             return createService(name: "misagent")
-        case .profileInstall:
-            return NSLocalizedString("Unable to manage profiles on the device", comment: "")
-        case .profileRemove:
-            return NSLocalizedString("Unable to manage profiles on the device", comment: "")
+        case .profileInstall(let reason):
+            return String(format: NSLocalizedString("Unable to install a profile on the device: %@", comment: ""), reason)
+        case .profileRemove(let reason):
+            return String(format: NSLocalizedString("Unable to remove a profile from the device: %@", comment: ""), reason)
         case .createLockdown:
             return NSLocalizedString("Unable to connect to lockdown", comment: "")
         case .createCoreDevice:
