@@ -368,39 +368,6 @@ public class DatabaseManager
                         context: context
                     )
                     
-                    // figure out if the current AltStoreApp is signed with "Use Main Profie" option
-                    // by checking if the first extension's entitlement's application-identifier matches current one
-                    repeat {
-                        guard let pluginURL = Bundle.main.builtInPlugInsURL else {
-                            installedApp.useMainProfile = true
-                            break
-                        }
-                        guard let pluginFolders = try? FileManager.default.contentsOfDirectory(at: pluginURL, includingPropertiesForKeys: nil) else {
-                            installedApp.useMainProfile = true
-                            break
-                        }
-                        
-                        guard let pluginFolder = pluginFolders.first, let altPluginAppBundle = ALTApplication(fileURL: pluginFolder) else {
-                            installedApp.useMainProfile = true
-                            break
-                        }
-                        
-                        let entitlements = altPluginAppBundle.entitlements
-                        guard let appId = entitlements[ALTEntitlement.applicationIdentifier] as? String else {
-                            installedApp.useMainProfile = false
-                            debugLog("no ALTEntitlementApplicationIdentifier???")
-                            break
-                        }
-                        
-                        if appId.hasSuffix(Bundle.Info.activeBundleIdentifier) {
-                            installedApp.useMainProfile = true
-                        } else {
-                            installedApp.useMainProfile = false
-                        }
-                        
-                        
-                    } while(false)
-                    
                     installedApp.storeApp = storeApp
                     // Persist the release track for newly created self-app entries
                     if installedApp.releaseTrack == nil,
@@ -409,10 +376,26 @@ public class DatabaseManager
                     }
                 }
                 
+                // Bundle.main may be the embedded SideStore framework with no extensions.
+                // Inspect the active host, and reconcile existing database entries after
+                // external reinstalls even when the app version has not changed.
+                let mainApplicationIdentifier = localAppBundle.entitlements[.applicationIdentifier] as? String
+                let localExtensions = localAppBundle.appExtensions
+                let usesMainProfile = localExtensions.isEmpty || localExtensions.allSatisfy { appExtension in
+                    guard let mainApplicationIdentifier,
+                          let extensionApplicationIdentifier = appExtension.entitlements[.applicationIdentifier] as? String else {
+                        return false
+                    }
+                    return extensionApplicationIdentifier == mainApplicationIdentifier
+                }
+                let signingLayoutChanged = installedApp.useMainProfile != usesMainProfile
+                installedApp.useMainProfile = usesMainProfile
+                debugLog("[DatabaseManager] Host signing layout: useMainProfile=\(usesMainProfile), extensions=\(localExtensions.count), changed=\(signingLayoutChanged)")
+
                 /* App Extensions */
                 var installedExtensions = Set<InstalledExtension>()
                 
-                for appExtension in localAppBundle.appExtensions
+                for appExtension in localExtensions
                 {
                     let resignedBundleID = appExtension.bundleIdentifier
                     let originalBundleID = resignedBundleID.replacingOccurrences(of: localAppBundle.bundleIdentifier, with: StoreApp.altstoreAppID)
@@ -440,7 +423,7 @@ public class DatabaseManager
                 #if DEBUG
                 let replaceCachedApp = true
                 #else
-                let replaceCachedApp = !FileManager.default.fileExists(atPath: fileURL.path) || installedApp.version != localAppBundle.version || installedApp.buildVersion != localAppBundle.buildVersion
+                let replaceCachedApp = signingLayoutChanged || !FileManager.default.fileExists(atPath: fileURL.path) || installedApp.version != localAppBundle.version || installedApp.buildVersion != localAppBundle.buildVersion
                 #endif
                 
                 if replaceCachedApp

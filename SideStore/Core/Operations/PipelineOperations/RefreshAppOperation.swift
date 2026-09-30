@@ -22,8 +22,18 @@ final class RefreshAppOperation: BasePipelineOperation<InstallAppOperationContex
         }
         
         guard let appBundle = self.context.targetAppBundle else { throw OperationError(.appNotFound(name: nil)) }
+        // A successful misagent install only confirms that iOS accepted the profile.
+        // It does not verify that PlugInKit can launch an installed app extension.
+        debugLog("[RefreshAppOperation] Profile-only refresh: useMainProfile=\(self.context.useMainProfile), profiles=\(profiles.count), extensions=\(appBundle.appExtensions.count)")
+        for appExtension in appBundle.appExtensions {
+            let identifier = appExtension.entitlements[.applicationIdentifier] as? String ?? "missing"
+            let embeddedExpiry = appExtension.provisioningProfile?.expirationDate.description ?? "missing"
+            debugLog("[RefreshAppOperation] Extension \(appExtension.bundleIdentifier): signedApplicationIdentifier=\(identifier), cachedEmbeddedExpiry=\(embeddedExpiry)")
+        }
         self.setProgress(10)
         for p in profiles {
+            let identifier = p.value.entitlements[.applicationIdentifier] as? String ?? "missing"
+            debugLog("[RefreshAppOperation] Installing profile for \(p.key): applicationIdentifier=\(identifier), expires=\(p.value.expirationDate)")
             do {
                 try await installProvisioningProfiles(p.value.data)
             } catch {
@@ -56,14 +66,21 @@ final class RefreshAppOperation: BasePipelineOperation<InstallAppOperationContex
               let installedApp = dbContext.object(with: mainApp.objectID) as? InstalledApp else {
             throw OperationError(.appNotFound(name: appBundle.name))
         }
-        installedApp.update(provisioningProfile: profiles.values.first!)
+        guard let mainProfile = profiles[self.context.targetBundleIdentifier] else {
+            throw OperationError.invalidParameters("RefreshAppOperation: main provisioning profile is missing")
+        }
+        installedApp.update(provisioningProfile: mainProfile)
         
         if let certStatus = self.context.targetCertStatus {
             installedApp.certificateStatus = certStatus
         }
 
         for installedExtension in installedApp.appExtensions {
-            guard let provisioningProfile = profiles[installedExtension.bundleIdentifier] else { continue }
+            let profileIdentifier = installedExtension.bundleIdentifier.replacingOccurrences(
+                of: self.context.bundleIdentifier,
+                with: self.context.targetBundleIdentifier
+            )
+            guard let provisioningProfile = self.context.useMainProfile ? mainProfile : profiles[profileIdentifier] else { continue }
             installedExtension.update(provisioningProfile: provisioningProfile)
         }
         return installedApp
