@@ -250,7 +250,7 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     
     @MainActor
     func resolveResign(mismatchReason: CodeSignValidationReason, context: AuthenticatedOperationContext) async throws -> Bool {
-        guard presentingViewController?.viewIfLoaded?.window != nil else {
+        guard presentingViewController != nil else {
             debugLog("[AuthFlowHandler] Certificate repair requires foreground UI: \(mismatchReason)")
             throw NSError(domain: "SideStoreAuthenticationUIRequired", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Signing certificate repair requires opening SideStore (\(mismatchReason)). Background refresh cannot display the repair screen."
