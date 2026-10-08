@@ -58,11 +58,15 @@ public struct CodeSignValidator {
             return .failure(.missingCertificate)
         }
         
-        // 1. Expired Certificate / Profile
+        // Profile-only refresh installs a replacement through misagent; it does not
+        // rewrite embedded.mobileprovision in the signed app bundle. Its original
+        // expiration is therefore not the effective runtime authorization and must
+        // not trigger the interactive certificate-repair flow after seven days.
+        // Keep validating the binary's certificate and signer identity below.
         if runningProfile.expirationDate <= Date() {
-            debugLog("[CodeSignValidator] Validation failed: expired (running profile is expired: \(runningProfile.expirationDate))")
-            return .failure(.expired)
-        } else if runningCert.expiryDate <= Date() {
+            debugLog("[CodeSignValidator] Embedded profile is outdated after profile-only refresh; validating signing certificate independently")
+        }
+        if runningCert.expiryDate <= Date() {
             debugLog("[CodeSignValidator] Validation failed: expired (running certificate is expired: \(runningCert.expiryDate))")
             return .failure(.expired)
         }

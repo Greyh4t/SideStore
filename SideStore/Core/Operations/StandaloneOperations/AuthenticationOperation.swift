@@ -401,7 +401,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
                 if let signingCertificate = certificate, !self.skipCertificateProvisioning
                 {
                     let signer = ALTSigner(team: team, certificate: signingCertificate)
-                    let didResign = await self.validateCodeSign(signer: signer, session: session)
+                    let didResign = try await self.validateCodeSign(signer: signer, session: session)
                     self.verboseLog("[Authentication] finalizeAuthentication: didResign = \(didResign)")
                     
                     if !didResign && self.requiresPostAuthFlow {
@@ -485,7 +485,7 @@ private extension AuthenticationOperation {
         }
     }
     
-    private func validateCodeSign(signer: ALTSigner, session: ALTAppleAPISession) async -> Bool {
+    private func validateCodeSign(signer: ALTSigner, session: ALTAppleAPISession) async throws -> Bool {
         self.verboseLog("[Authentication] validateCodeSign: entering method")
         guard let appBundle = ALTApplication(fileURL: Bundle.Info.activeBundleURL), 
               let provisioningProfile = appBundle.provisioningProfile else 
@@ -522,7 +522,7 @@ private extension AuthenticationOperation {
                     return try await handler.resolveResign(mismatchReason: reason, context: self.context)
                 } catch {
                     self.verboseLog("[Authentication] validateCodeSign: error occured when handling resolveResign error: \(error)")
-                    return false
+                    throw error
                 }
         }
     }
