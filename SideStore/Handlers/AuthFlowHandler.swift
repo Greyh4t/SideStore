@@ -31,7 +31,9 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     @MainActor
     func credentials() async throws -> (String, String) {
         guard let presentingViewController = self.presentingViewController else {
-            throw OperationError.cancelled
+            throw NSError(domain: "SideStoreAuthenticationUIRequired", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Apple ID sign-in requires opening SideStore. Background refresh cannot display the sign-in screen."
+            ])
         }
         
         if let _ = self.presentedAuthVC {

@@ -13,7 +13,7 @@ import Starscream
 @preconcurrency import AltSign
 
 final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOperationContext, ALTAnisetteData>, @unchecked Sendable {
-    public static let defaultClientInfo = "<MacBookPro18,3> <macOS;26.6;25F84> <com.apple.AuthKit/1 (com.apple.dt.Xcode/26.0)>"
+    public static let defaultClientInfo = "<MacBookPro18,3> <Mac OS X;26.6;25F84> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
     public static let defaultUserAgent = "AuthKit/1 (Macintosh; OS X 26.6) (com.apple.dt.Xcode/26.0)"
 
     var url: URL?
@@ -444,19 +444,18 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
         let (data, _) = try await URLSession.shared.data(for: request)
         
         if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: String] {
-            if let clientInfo = json["client_info"] {
+            if json["client_info"] != nil {
                 self.verboseLog("[FetchAnisetteDataOperation] Server is V3")
                 
                 await AnisetteConfigManager.shared.saveServerHeaders(json)
                 
-                self.verboseLog("[FetchAnisetteDataOperation] Overriding server Client-Info '\(clientInfo)' and User-Agent '\(json["user_agent"] ?? "")' with defaults")
-                self.clientInfo = FetchAnisetteDataOperation.defaultClientInfo
-                self.userAgent = FetchAnisetteDataOperation.defaultUserAgent
+                // Server discovery must not overwrite the user's saved overrides.
+                let config = await AnisetteConfigManager.shared.loadConfig()
+                self.clientInfo = config.clientInfo.isEmpty ? FetchAnisetteDataOperation.defaultClientInfo : config.clientInfo
+                self.userAgent = config.userAgent.isEmpty ? FetchAnisetteDataOperation.defaultUserAgent : config.userAgent
                 self.verboseLog("[FetchAnisetteDataOperation] Client-Info: \(self.clientInfo!)")
                 self.verboseLog("[FetchAnisetteDataOperation] User-Agent: \(self.userAgent!)")
                 
-                let config = AnisetteConfig(clientInfo: self.clientInfo!, userAgent: self.userAgent!)
-                await AnisetteConfigManager.shared.saveConfig(config)
                 
                 if AnisetteDataManager.shared.anisetteIdentifier == nil {
                     self.verboseLog("[FetchAnisetteDataOperation] Generating identifier")

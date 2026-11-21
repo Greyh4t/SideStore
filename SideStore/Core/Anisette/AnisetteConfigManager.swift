@@ -79,7 +79,15 @@ public actor AnisetteConfigManager {
     
     public func loadConfig() -> AnisetteConfig {
         if let data = try? Data(contentsOf: configFileURL),
-           let config = try? Foundation.JSONDecoder().decode(AnisetteConfig.self, from: data) {
+           var config = try? Foundation.JSONDecoder().decode(AnisetteConfig.self, from: data) {
+            // Migrate only the previously shipped default; preserve custom headers
+            // and the device identity used to provision the existing Anisette data.
+            let legacyClientInfo = "<MacBookPro18,3> <macOS;26.6;25F84> <com.apple.AuthKit/1 (com.apple.dt.Xcode/26.0)>"
+            if config.clientInfo == legacyClientInfo {
+                config.clientInfo = FetchAnisetteDataOperation.defaultClientInfo
+                saveConfig(config)
+                debugLog("[AnisetteConfigManager] Migrated legacy default Client Info; device identity preserved")
+            }
             return config
         }
         // Fallback to static defaults in FetchAnisetteDataOperation

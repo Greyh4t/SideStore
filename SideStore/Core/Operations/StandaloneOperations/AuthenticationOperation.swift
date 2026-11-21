@@ -88,6 +88,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
     
     private var appleIDEmailAddress: String?
     private var requiresPostAuthFlow = false
+    private var silentSignInError: Error?
     
     let skipDeviceRegistration: Bool
     let skipCertificateProvisioning: Bool
@@ -277,6 +278,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
     }
     
     private func silentSignIn() async throws -> (ALTAccount, ALTAppleAPISession)? {
+        self.silentSignInError = nil
         let ephemeralAuthentication = LiveProcessEphemeralAuthentication.current()
         let adsid = ephemeralAuthentication?.adsid ?? AuthManager.shared.adsid
         let xcodeToken = ephemeralAuthentication?.xcodeToken ?? AuthManager.shared.xcodeToken
@@ -301,6 +303,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
                 )
             } catch {
                 self.debugLog("[AuthenticationOperation] Token authentication failed: \(error)")
+                self.silentSignInError = error
             }
         }
         
@@ -313,6 +316,7 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
                 return try await self.authenticate(appleID: appleID, password: password)
             } catch {
                 self.debugLog("[AuthenticationOperation] Saved password authentication failed: \(error)")
+                self.silentSignInError = error
             }
         }
 
@@ -324,7 +328,19 @@ final class AuthenticationOperation: BaseStandaloneOperation<AuthenticatedOperat
         let handler = self.context.authenticationHandler
         
         while true {
-            let (appleID, password) = try await handler.credentials()
+            let credentials: (String, String)
+            do {
+                credentials = try await handler.credentials()
+            } catch {
+                // With no foreground UI, report why silent sign-in failed instead
+                // of replacing a server/network error with a generic cancellation.
+                let credentialsError = error as NSError
+                if credentialsError.domain == "SideStoreAuthenticationUIRequired", let silentSignInError = self.silentSignInError {
+                    throw silentSignInError
+                }
+                throw error
+            }
+            let (appleID, password) = credentials
             if self.isCancelled { throw OperationError.cancelled }
             
             do {
