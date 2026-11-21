@@ -106,19 +106,10 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
                 self.debugLog("[FetchAnisetteDataOperation] Provisioning flow failed: \(error). Checking recovery/retry options...")
                 
                 if isOffline {
-                    self.debugLog("[FetchAnisetteDataOperation] Recovery: Deleting local config and retrying online.")
-                    await AnisetteConfigManager.shared.deleteConfigFile()
-                    
-                    // Clear state properties so performProvisioning will fetch fresh data from server
-                    self.clientInfo = nil
-                    self.userAgent = nil
-                    
-                    do {
-                        return try await self.performProvisioning(excluding: excludedURLs)
-                    } catch {
-                        self.debugLog("[FetchAnisetteDataOperation] Recovery attempt failed: \(error)")
-                        throw error
-                    }
+                    // A rejected registration does not imply that saved overrides
+                    // are corrupt. Keep the user's explicit configuration intact.
+                    self.debugLog("[FetchAnisetteDataOperation] Provisioning failed; preserving offline configuration")
+                    throw error
                 }
                 
                 if let failedURLString = self.url?.absoluteString, !UserDefaults.standard.disableAnisetteRotation {
@@ -515,6 +506,7 @@ private class AnisetteWebSocketSession: WebSocketDelegate {
     
     private let parentOperation: FetchAnisetteDataOperation
     private var continuation: SafeContinuation<ALTAnisetteData, Error>?
+    private var receivedProvisioningSuccess = false
     
     private var socket: WebSocket!
     
@@ -551,10 +543,18 @@ private class AnisetteWebSocketSession: WebSocketDelegate {
             parentOperation.debugLog("[FetchAnisetteDataOperation] Connected")
             
         case .disconnected(let string, let code):
+            // After registration, the WebSocket is no longer needed. The HTTP
+            // header fetch owns completion; a normal close must not race it.
+            if self.receivedProvisioningSuccess {
+                return
+            }
             parentOperation.debugLog("[FetchAnisetteDataOperation] Disconnected: \(code); \(string)")
             self.continuation?.resume(throwing: OperationError.provisioningError(result: "WebSocket disconnected: \(string) (code: \(code))", message: nil))
             
         case .error(let error):
+            if self.receivedProvisioningSuccess {
+                return
+            }
             parentOperation.debugLog("[FetchAnisetteDataOperation] Got error: \(String(describing: error))")
             if let error = error {
                 self.continuation?.resume(throwing: error)
@@ -563,10 +563,16 @@ private class AnisetteWebSocketSession: WebSocketDelegate {
             }
             
         case .peerClosed:
+            if self.receivedProvisioningSuccess {
+                return
+            }
             parentOperation.debugLog("[FetchAnisetteDataOperation] Peer closed connection")
             self.continuation?.resume(throwing: OperationError.provisioningError(result: "Peer closed connection", message: nil))
             
         case .cancelled:
+            if self.receivedProvisioningSuccess {
+                return
+            }
             parentOperation.debugLog("[FetchAnisetteDataOperation] Connection cancelled")
             self.continuation?.resume(throwing: OperationError.provisioningError(result: "WebSocket connection cancelled", message: nil))
             
@@ -678,6 +684,9 @@ private class AnisetteWebSocketSession: WebSocketDelegate {
     }
     
     private func handleProvisioningSuccess(json: [String: Any], client: WebSocketClient) {
+        if self.receivedProvisioningSuccess {
+            return
+        }
         parentOperation.debugLog("[FetchAnisetteDataOperation] Provisioning succeeded!")
         guard let adiPb = json["adi_pb"] as? String else {
             parentOperation.debugLog("[FetchAnisetteDataOperation] The server didn't give us an adi.pb file")
@@ -685,15 +694,16 @@ private class AnisetteWebSocketSession: WebSocketDelegate {
             self.continuation?.resume(throwing: OperationError.provisioningError(result: "The server didn't give us an adi.pb file", message: nil))
             return
         }
+        self.receivedProvisioningSuccess = true
         AnisetteDataManager.shared.anisetteAdiBlob = adiPb
         Task {
             do {
                 let anisette = try await parentOperation.fetchAnisetteV3(AnisetteDataManager.shared.anisetteIdentifier!, AnisetteDataManager.shared.anisetteAdiBlob!)
-                client.disconnect(closeCode: 0)
                 self.continuation?.resume(returning: anisette)
-            } catch {
                 client.disconnect(closeCode: 0)
+            } catch {
                 self.continuation?.resume(throwing: error)
+                client.disconnect(closeCode: 0)
             }
         }
     }
