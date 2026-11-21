@@ -84,7 +84,9 @@ public actor AnisetteConfigManager {
             // and the device identity used to provision the existing Anisette data.
             let legacyClientInfo = "<MacBookPro18,3> <macOS;26.6;25F84> <com.apple.AuthKit/1 (com.apple.dt.Xcode/26.0)>"
             if config.clientInfo == legacyClientInfo {
-                config.clientInfo = FetchAnisetteDataOperation.defaultClientInfo
+                // Preserve the previous migration's identity. New-install defaults
+                // must not silently rebind an existing registered identity.
+                config.clientInfo = "<MacBookPro18,3> <Mac OS X;26.6;25F84> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
                 saveConfig(config)
                 debugLog("[AnisetteConfigManager] Migrated legacy default Client Info; device identity preserved")
             }

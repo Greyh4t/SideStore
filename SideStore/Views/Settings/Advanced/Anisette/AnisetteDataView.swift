@@ -269,9 +269,9 @@ struct AnisetteDataView: View {
                 Section {
                     Toggle(isOn: $viewModel.isOfflineMode) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Use Offline Config File")
+                            Text("Use Saved Client Settings")
                                 .font(.body)
-                            Text("Bypasses fetching client info from servers")
+                            Text("Keep locally saved client identity headers")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -284,7 +284,7 @@ struct AnisetteDataView: View {
                 } header: {
                     Text("Operational Mode")
                 } footer: {
-                    Text("When enabled, SideStore uses the locally saved JSON configuration parameters for all authentication headers without making client_info requests to servers.")
+                    Text("Uses your saved Client Info and User Agent. Internet access is still required for Anisette registration, fresh authentication data, and Apple ID sign-in.")
                 }
                 
                 if viewModel.viewMode == 0 {

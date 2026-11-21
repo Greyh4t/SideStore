@@ -13,8 +13,9 @@ import Starscream
 @preconcurrency import AltSign
 
 final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOperationContext, ALTAnisetteData>, @unchecked Sendable {
-    public static let defaultClientInfo = "<MacBookPro18,3> <Mac OS X;26.6;25F84> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
-    public static let defaultUserAgent = "AuthKit/1 (Macintosh; OS X 26.6) (com.apple.dt.Xcode/26.0)"
+    // Paired with the default jkcoxson Mac server in UserDefaults+AltStore.
+    public static let defaultClientInfo = "<MacBookPro13,3> <Mac OS X;10.12.6;16G29> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
+    public static let defaultUserAgent = "akd/1.0 CFNetwork/811.5.4 Darwin/16.7.0"
 
     var url: URL?
     var startProvisioningURL: URL?
@@ -78,14 +79,8 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
         }
         
         self.setProgress(20)
-        /*
-        if UserDefaults.standard.useOnDeviceAnisette {
-            self.debugLog("[FetchAnisetteDataOperation] Fetching anisette via On-Device Anisette (ODA)...")
-            let result = try await OnDeviceAnisetteManager.shared.fetchAnisetteData()
-            self.setProgress(100)
-            return result
-        }
-        */
+        // This LiveContainer build uses remote Anisette. Its settings UI must not
+        // offer an On-Device switch until that execution path is supported.
 
         let result = try await self.startProvisioningFlow()
         self.setProgress(100)
@@ -165,26 +160,27 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
     }
 
     private func getAnisetteServerUrl(excluding: Set<String> = []) async throws -> String {
+        let lastServer = UserDefaults.standard.menuAnisetteURL
+        
+        if UserDefaults.standard.disableAnisetteRotation {
+            self.verboseLog("[FetchAnisetteDataOperation] Auto-rotation disabled. Pinging currently active server: \(lastServer)")
+            guard let url = URL(string: lastServer) else {
+                throw NSError(domain: "AnisetteError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Active server URL is invalid: \(lastServer)"])
+            }
+            let success = try await pingServer(url)
+            if success {
+                return lastServer
+            } else {
+                throw NSError(domain: "AnisetteError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Active server is offline: \(lastServer)"])
+            }
+        }
+
+        // A fixed server does not depend on downloading the public catalog.
+        // Load the catalog only when the user explicitly enables rotation.
         let serverUrls = await AnisetteServersManager.shared.getActiveServerURLs()
         let filteredUrls = serverUrls.filter { !excluding.contains($0) }
         guard !filteredUrls.isEmpty else {
             throw NSError(domain: "AnisetteError", code: 0, userInfo: [NSLocalizedDescriptionKey: "No working anisette servers found."])
-        }
-
-        let lastServer = UserDefaults.standard.menuAnisetteURL
-        
-        if UserDefaults.standard.disableAnisetteRotation {
-            let activeServer = excluding.contains(lastServer) ? (filteredUrls.first ?? lastServer) : lastServer
-            self.verboseLog("[FetchAnisetteDataOperation] Auto-rotation disabled. Pinging currently active server: \(activeServer)")
-            guard let url = URL(string: activeServer) else {
-                throw NSError(domain: "AnisetteError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Active server URL is invalid: \(activeServer)"])
-            }
-            let success = try await pingServer(url)
-            if success {
-                return activeServer
-            } else {
-                throw NSError(domain: "AnisetteError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Active server is offline: \(activeServer)"])
-            }
         }
         
         let startIndex = filteredUrls.firstIndex(of: lastServer) ?? 0
@@ -417,7 +413,9 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
             let config = await AnisetteConfigManager.shared.loadConfig()
             self.clientInfo = config.clientInfo
             self.userAgent = config.userAgent
+            try self.prepareAnisetteIdentity()
             self.verboseLog("[FetchAnisetteDataOperation] Offline mode enabled. Skipping server client_info fetch.")
+            return
         }
         
         if self.clientInfo != nil &&
@@ -425,7 +423,7 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
            self.mdLu != nil &&
            self.deviceId != nil &&
            AnisetteDataManager.shared.anisetteIdentifier != nil {
-            self.verboseLog("[FetchAnisetteDataOperation] Skipping client_info fetch since all the properties we need aren't nil")
+            self.verboseLog("[FetchAnisetteDataOperation] Using cached client info and identity")
             return
         }
         self.verboseLog("[FetchAnisetteDataOperation] Trying to get client_info")
@@ -446,33 +444,35 @@ final class FetchAnisetteDataOperation: BaseStandaloneOperation<AuthenticatedOpe
                 self.userAgent = config.userAgent.isEmpty ? FetchAnisetteDataOperation.defaultUserAgent : config.userAgent
                 self.verboseLog("[FetchAnisetteDataOperation] Client-Info: \(self.clientInfo!)")
                 self.verboseLog("[FetchAnisetteDataOperation] User-Agent: \(self.userAgent!)")
-                
-                
-                if AnisetteDataManager.shared.anisetteIdentifier == nil {
-                    self.verboseLog("[FetchAnisetteDataOperation] Generating identifier")
-                    var bytes = [Int8](repeating: 0, count: 16)
-                    let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-                    
-                    if status != errSecSuccess {
-                        self.debugLog("[FetchAnisetteDataOperation] ERROR GENERATING IDENTIFIER!!! \(status)")
-                        throw OperationError.provisioningError(result: "Couldn't generate identifier", message: nil)
-                    }
-                    
-                    AnisetteDataManager.shared.anisetteIdentifier = Data(bytes: &bytes, count: bytes.count).base64EncodedString()
-                }
-                
-                let decoded = Data(base64Encoded: AnisetteDataManager.shared.anisetteIdentifier!)!
-                self.mdLu = decoded.sha256().hexEncodedString()
-                self.verboseLog("[FetchAnisetteDataOperation] X-Apple-I-MD-LU: \(self.mdLu!)")
-                let uuid: UUID = decoded.object()
-                self.deviceId = uuid.uuidString.uppercased()
-                self.verboseLog("[FetchAnisetteDataOperation] X-Mme-Device-Id: \(self.deviceId!)")
+                try self.prepareAnisetteIdentity()
             } else {
                 _ = try await self.handleV1()
             }
         } else {
             throw OperationError.anisetteV3Error(message: "Couldn't fetch client info. The returned data may not be in JSON")
         }
+    }
+
+    private func prepareAnisetteIdentity() throws {
+        if AnisetteDataManager.shared.anisetteIdentifier == nil {
+            self.verboseLog("[FetchAnisetteDataOperation] Generating identifier")
+            var bytes = [UInt8](repeating: 0, count: 16)
+            let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+            if status != errSecSuccess {
+                throw OperationError.provisioningError(result: "Couldn't generate identifier", message: nil)
+            }
+            AnisetteDataManager.shared.anisetteIdentifier = Data(bytes).base64EncodedString()
+        }
+
+        guard let identifier = AnisetteDataManager.shared.anisetteIdentifier,
+              let decoded = Data(base64Encoded: identifier), decoded.count == 16 else {
+            throw OperationError.provisioningError(result: "Saved Anisette identifier is invalid", message: nil)
+        }
+        self.mdLu = decoded.sha256().hexEncodedString()
+        let uuid: UUID = decoded.object()
+        self.deviceId = uuid.uuidString.uppercased()
+        self.verboseLog("[FetchAnisetteDataOperation] X-Apple-I-MD-LU: \(self.mdLu!)")
+        self.verboseLog("[FetchAnisetteDataOperation] X-Mme-Device-Id: \(self.deviceId!)")
     }
     
     func fetchAnisetteV3(_ identifier: String, _ adiPb: String) async throws -> ALTAnisetteData {

@@ -14,7 +14,6 @@ private extension Color {
 }
 
 struct UserCustomizationsView: View {
-    @State private var useOnDeviceAnisette: Bool = UserDefaults.standard.useOnDeviceAnisette
     @State private var customizeAppId: Bool = UserDefaults.standard.customizeAppId
     @State private var customizeAppExtensions: Bool = UserDefaults.standard.customizeAppExtensions
     @State private var autoFixAppGroupIDs: Bool = UserDefaults.standard.autoFixAppGroupIDs
@@ -77,15 +76,10 @@ struct UserCustomizationsView: View {
                     VStack(spacing: 0) {
                         toggleRow(
                             title: "On-Device Anisette",
-                            subtitle: "Run ADI emulation directly on device instead of remote servers",
-                            isOn: Binding(
-                                get: { useOnDeviceAnisette },
-                                set: { newValue in
-                                    useOnDeviceAnisette = newValue
-                                    UserDefaults.standard.useOnDeviceAnisette = newValue
-                                }
-                            )
+                            subtitle: "Unavailable in this build. Remote Anisette servers are used.",
+                            isOn: .constant(false)
                         )
+                        .disabled(true)
                     }
                     .background(Color.settingsRowBackground)
                     .cornerRadius(14)

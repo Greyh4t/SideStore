@@ -364,10 +364,12 @@ public extension UserDefaults
             #keyPath(UserDefaults.isIdleTimeoutDisableEnabled): true,
             #keyPath(UserDefaults.betaUdpatesTrack): defaultBetaUpdatesTrack,
             #keyPath(UserDefaults.menuAnisetteList): "https://servers.sidestore.io/servers.json",
-            #keyPath(UserDefaults.menuAnisetteURL): "https://ani.sidestore.io",
-            #keyPath(UserDefaults.isAnisetteOfflineMode): false,
-            #keyPath(UserDefaults.disableAnisetteRotation): false,
-            #keyPath(UserDefaults.useOnDeviceAnisette): true,
+            // These defaults apply only when the user has no saved preference.
+            // Client headers are paired in FetchAnisetteDataOperation.
+            #keyPath(UserDefaults.menuAnisetteURL): "https://mac-ani.jkcoxson.com",
+            #keyPath(UserDefaults.isAnisetteOfflineMode): true,
+            #keyPath(UserDefaults.disableAnisetteRotation): true,
+            #keyPath(UserDefaults.useOnDeviceAnisette): false,
             #keyPath(UserDefaults.useLocalVPN): true,
             #keyPath(UserDefaults.enableEMPforWireguard): false,
             #keyPath(UserDefaults.skipNonCopyableBackupFiles): true,
