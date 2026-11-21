@@ -98,6 +98,12 @@ class AuthFlowHandler: AnyObject, AuthenticationHandler, AnisetteServerHandler {
     
     @MainActor
     func verificationCode() async throws -> String? {
+        guard presentingViewController != nil else {
+            debugLog("[AuthFlowHandler] Two-factor verification requires a foreground sign-in presenter")
+            throw NSError(domain: "SideStoreAuthenticationUIRequired", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "Two-factor authentication requires opening SideStore and signing in from Settings."
+            ])
+        }
         return try await withCheckedThrowingContinuation { continuation in
             let alertController = UIAlertController(title: NSLocalizedString("Please enter the 6-digit verification code that was sent to your Apple devices.", comment: ""), message: nil, preferredStyle: .alert)
             var observer: NSObjectProtocol?
